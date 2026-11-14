@@ -22,7 +22,6 @@ import dev.metrofuse.api.HomePlugin
 import dev.metrofuse.api.HomeRequest
 import dev.metrofuse.api.LoginCredentials
 import dev.metrofuse.api.LoginField
-import dev.metrofuse.api.LoginPlugin
 import dev.metrofuse.api.LoginRequest
 import dev.metrofuse.api.MetadataContribution
 import dev.metrofuse.api.MetadataRequest
@@ -38,6 +37,8 @@ import dev.metrofuse.api.SearchResult
 import dev.metrofuse.api.StreamDescriptor
 import dev.metrofuse.api.StreamTransport
 import dev.metrofuse.api.TrackIdentity
+import dev.metrofuse.api.WebLoginPlugin
+import dev.metrofuse.api.WebLoginRequest
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -58,7 +59,7 @@ import java.util.Locale
 // The provider owns its network client and account session for each activation.
 class YouTubeMusicPlugin :
     NativePlugin,
-    LoginPlugin,
+    WebLoginPlugin,
     HomePlugin {
     private var client: HttpClient? = null
     private var innerTube: InnerTube? = null
@@ -69,6 +70,23 @@ class YouTubeMusicPlugin :
     override val loginState: StateFlow<PluginLoginState> get() = session?.loginState ?: signedOut
 
     override suspend fun loginRequest() = request
+
+    override suspend fun webLoginRequest() =
+        WebLoginRequest(
+            url = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com",
+            cookieUrl = "https://music.youtube.com",
+            cookieField = "cookie",
+            requiredCookies = listOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID"),
+            allowedHosts =
+                listOf(
+                    "music.youtube.com",
+                    "www.youtube.com",
+                    "accounts.google.com",
+                    "consent.google.com",
+                    "myaccount.google.com",
+                    "www.google.com",
+                ),
+        )
 
     override suspend fun login(credentials: LoginCredentials) = checkNotNull(session).login(credentials)
 
@@ -112,7 +130,7 @@ class YouTubeMusicPlugin :
             )
         val musicClient = YouTubeGuestClient(http)
         session = YouTubeSession(tube, musicClient)
-        val strings = Json.parseToJsonElement(context.resources.readAsset("login.json").toString(Charsets.UTF_8)) as JsonObject
+        val strings = Json.parseToJsonElement(context.resources.readAsset("assets/login.json").toString(Charsets.UTF_8)) as JsonObject
         request =
             LoginRequest(
                 fields = listOf(LoginField("cookie", requireNotNull((strings["label"] as? JsonPrimitive)?.contentOrNull))),

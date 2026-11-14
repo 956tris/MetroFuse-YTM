@@ -4,7 +4,7 @@ GPL-3.0. Catalog parsing and the original guest integration were adapted from Me
 
 The build bundles InnerTubeX v0.11.7 from https://github.com/MetrolistGroup/innertubex/tree/v0.11.7 and QuackJS v0.1.4 from https://github.com/MetrolistGroup/quackjs/tree/v0.1.4. The host supplies Kotlin, coroutines, serialization, Ktor, Compose and MetroFuse API 1.1.0. Production code uses platform HTTP engine discovery, including on Android. The plugin owns its network client and session and does not read the application's old YouTube account.
 
-This implementation provides search, catalog, metadata, Home, cookie account authentication and audio extraction. Authentication verifies an active account before committing credentials. The host stores credentials through its owner-scoped encrypted store. Failed account replacement preserves the previous session, and logout clears it. Login text is packaged in assets/login.json.
+This implementation provides search, catalog, metadata, Home, WebView account sign-in and audio extraction. WebLoginPlugin supplies the browser request; the host captures the session and passes it only to the current activation's login callback. Authentication verifies an active account before committing credentials. The host stores credentials through its owner-scoped encrypted store. Failed account replacement preserves the previous session, and logout clears it. Login text is packaged in assets/login.json.
 
 SABR sessions cross the public plugin API as the metrofuse.sabr.v1 JSON attribute on a SABR_UMP StreamDescriptor. The app validates the media identity, URL, format IDs and bounded session data, then creates its own InnerTubeX SabrBootstrap. Plugin-private classes are never passed into the app player.
 

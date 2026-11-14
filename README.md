@@ -8,9 +8,9 @@ The universal `youtube-music.mfp` provides sign-in, Home, catalog and direct aud
 
 ## Account sign-in
 
-Open MetroFuse's profile menu and select Login. App Settings remains available for every provider, including providers without login support.
+Open MetroFuse's profile menu and select Login. YouTube sign-in opens in an embedded WebView on Android or a private WebView2 window on Windows. MetroFuse captures the session after sign-in and the provider verifies the active YouTube account. App Settings remains available for every provider, including providers without login support.
 
-This provider uses cookie authentication. Sign in to `music.youtube.com` in your browser, open the browser's developer tools, and copy the Cookie request header from a request to that site. Paste the complete header into the provider's login form. The provider verifies an active YouTube account before accepting it. A failed verification preserves the previous valid session.
+Use a MetroFuse build containing the plugin WebView sign-in support. Enter your Google account details directly in Google's sign-in page. There is no cookie-copying form. The host passes the captured session only to this plugin's current activation. A failed verification preserves the previous valid session.
 
 Credentials stay with this provider and are stored by the host using Windows DPAPI or Android Keystore encryption. They do not go into ordinary plugin settings or this repository. Linux and macOS encrypted credential persistence is not implemented by the current host. Cookies grant access to your account, so do not share them or put them in issues or logs. Log out from the same profile menu to clear the provider session.
 
@@ -43,7 +43,7 @@ $env:METROFUSE_LIVE_YTM = "1"
 
 Only the initial search and catalog browse pages are exposed. Pagination, account/channel switching, music videos and library mutation are not implemented. Home uses service-provided shelf titles and excludes shelves linked to `FEmusic_library`.
 
-The host must include the SABR plugin transport adapter for native audio. The adapter reconstructs the session using host-owned InnerTubeX classes. Plugin-owned InnerTubeX objects never cross the plugin API.
+The host must include the plugin WebView sign-in support and SABR transport adapter. Native sign-in uses the optional `WebLoginPlugin` interface, while MFP sign-in uses `host.login({request, web, login, logout})`. The browser request declares the login URL, cookie origin, required session-cookie names and allowed navigation hosts. Existing `LoginPlugin` and `LoginRequest` binaries retain their ABI. The SABR adapter reconstructs the session using host-owned InnerTubeX classes. Plugin-owned InnerTubeX objects never cross the plugin API.
 
 ## Attribution
 

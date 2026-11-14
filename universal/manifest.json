@@ -1,14 +1,14 @@
 {
   "id": "metrofuse.youtube-music",
   "name": "YouTube Music (JavaScript)",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "MetroFuse and MetroList contributors",
   "api": "1.1.0",
   "runtime": "javascript",
   "platforms": ["desktop", "android"],
   "script": "index.js",
   "capabilities": ["audio", "search", "catalog", "metadata", "settings", "login", "home"],
-  "home": {"title":"YouTube Music", "icon":"music_note"},
+  "home": {"title":"YouTube Music"},
   "description": "YouTube Music account sign-in, Home, catalog and direct audio. Use the native InnerTubeX JAR or APK for SABR and full player transforms.",
   "settings": [
     {"key":"audioEnabled","title":"Resolve YouTube Music audio","type":"BOOLEAN","default":true},

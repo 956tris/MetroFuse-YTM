@@ -1,7 +1,7 @@
 /* MetroFuse contributors, GPL-3.0. See SOURCE for provenance and limits. */
 import {videoId,search,page,home,accountName} from './modules/catalog.js';
 import {jsonValue,guestMusicContext,selectAudio,signaturePlan} from './modules/media.js';
-import {loginRequest,validateCookie,authorization} from './modules/account.js';
+import {loginRequest,webLoginRequest,validateCookie,authorization} from './modules/account.js';
 
 let host, bootstrapPromise, playerScriptPromise, playerScriptUrl;
 let cookie = null;
@@ -86,6 +86,7 @@ globalThis.plugin = {
     host = context;
     host.login({
       request: async () => loginRequest,
+      web: async () => webLoginRequest,
       login: async credentials => {
         const candidate = validateCookie(credentials?.values?.cookie);
         const name = accountName(await api('account/account_menu',{},null,candidate));

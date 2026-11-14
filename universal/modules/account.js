@@ -1,6 +1,13 @@
 export const loginRequest = {
-  fields: [{id: 'cookie', label: 'YouTube Music cookie header', secret: true}],
-  instructions: "Sign in to music.youtube.com in your browser, then copy the Cookie request header from a music.youtube.com request in the browser's developer tools. Paste the complete header here. MetroFuse verifies the account and stores this provider's credentials encrypted on this device. Do not share your cookies."
+  fields: [{id: 'cookie', label: 'YouTube Music session', secret: true}],
+  instructions: "Sign in to YouTube Music in the browser window. MetroFuse will finish automatically and store this provider's session encrypted on this device."
+};
+
+export const webLoginRequest = {
+  url: 'https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com',
+  cookieUrl: 'https://music.youtube.com', cookieField: 'cookie',
+  requiredCookies: ['SAPISID','__Secure-3PAPISID','__Secure-1PAPISID'],
+  allowedHosts: ['music.youtube.com','www.youtube.com','accounts.google.com','consent.google.com','myaccount.google.com','www.google.com']
 };
 
 export function validateCookie(value) {

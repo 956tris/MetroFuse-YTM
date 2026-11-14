@@ -10,9 +10,9 @@ The universal `youtube-music.mfp` provides sign-in, Home, catalog and direct aud
 
 Open MetroFuse's profile menu and select Login. YouTube sign-in opens in an embedded WebView on Android or a private WebView2 window on Windows. MetroFuse captures the session after sign-in and the provider verifies the active YouTube account. App Settings remains available for every provider, including providers without login support.
 
-Use a MetroFuse build containing the plugin WebView sign-in support. Enter your Google account details directly in Google's sign-in page. There is no cookie-copying form. The host passes the captured session only to this plugin's current activation. A failed verification preserves the previous valid session.
+Use a MetroFuse build containing the plugin WebView sign-in support. Enter your Google account details directly in Google's sign-in page. The host passes the captured session only to this plugin's current activation. A failed verification preserves the previous valid session.
 
-Credentials stay with this provider and are stored by the host using Windows DPAPI or Android Keystore encryption. They do not go into ordinary plugin settings or this repository. Linux and macOS encrypted credential persistence is not implemented by the current host. Cookies grant access to your account, so do not share them or put them in issues or logs. Log out from the same profile menu to clear the provider session.
+The host stores this provider's accepted session with Windows DPAPI or Android Keystore encryption. Log out from the same profile menu to clear it. Linux and macOS encrypted session persistence is currently unavailable.
 
 ## Build from source
 

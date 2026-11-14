@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+*.keystore
+*.log
+__pycache__/
+.idea/
+
+# Compiled plugin downloads belong in GitHub Releases.
+/artifacts/
+*.apk
+*.mfp
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

@@ -1,0 +1,52 @@
+# MetroFuse YouTube Music
+
+An optional YouTube Music provider for MetroFuse plugin API 1.1.0. The native JAR and APK use InnerTubeX v0.11.7 and QuackJS v0.1.4 for search, catalog, metadata, Home, account authentication and audio, including SABR. Each activation owns its network client and account session.
+
+Download compiled packages from [GitHub Releases](https://github.com/956tris/MetroFuse-YouTube-Music/releases). Import `youtube-music.jar` on desktop or `youtube-music.apk` on Android through MetroFuse's Plugins settings, enable it, and select YouTube Music as your music and Home source. All implementations use `metrofuse.youtube-music`, so install one implementation at a time.
+
+The universal `youtube-music.mfp` provides sign-in, Home, catalog and direct audio in JavaScript. It supports a limited set of signature transforms. It does not implement SABR or the full YouTube `n` transform. Use the native package for InnerTubeX playback.
+
+## Account sign-in
+
+Open MetroFuse's profile menu and select Login. App Settings remains available for every provider, including providers without login support.
+
+This provider uses cookie authentication. Sign in to `music.youtube.com` in your browser, open the browser's developer tools, and copy the Cookie request header from a request to that site. Paste the complete header into the provider's login form. The provider verifies an active YouTube account before accepting it. A failed verification preserves the previous valid session.
+
+Credentials stay with this provider and are stored by the host using Windows DPAPI or Android Keystore encryption. They do not go into ordinary plugin settings or this repository. Linux and macOS encrypted credential persistence is not implemented by the current host. Cookies grant access to your account, so do not share them or put them in issues or logs. Log out from the same profile menu to clear the provider session.
+
+## Build from source
+
+Use Java 25, Gradle 9.8.2, Kotlin 2.4.21 and the matching MetroFuse API JAR. Build that API with `:plugin-api:desktopJar` from the MetroFuse KMP source. Set `ANDROID_HOME` to an SDK containing platform `android-37.0` and build tools `37.0.0` for APK packaging.
+
+```powershell
+./gradlew.bat :native:desktopTest :native:packagePluginJar :native:packagePluginApk "-PmetrofuseApiJar=C:\path\to\plugin-api-desktop-1.1.0.jar" --no-configuration-cache
+python tools/package-mfp.py
+node native/tests/javascript.mjs
+```
+
+Native outputs are in `native/build/outputs/plugins/`. The MFP is in `build/outputs/plugins/`. Compiled downloads and SHA256SUMS belong in Releases and are ignored by Git.
+
+The native packages bundle InnerTubeX and QuackJS. The host supplies the MetroFuse API, Kotlin, coroutines, serialization, Ktor and Compose. The native plugin uses Ktor's platform engine discovery and does not reference desktop-only CIO classes in production Android code.
+
+## Verification and limits
+
+Provider checks cover catalog parsing, quality selection, direct and SABR descriptors, account verification, failed account replacement, logout and Home locale handling. JavaScript checks exercise production callbacks, authentication hashes, account state, Home, catalog, direct audio and supported and unsupported signature transforms.
+
+The live native check on 14 November 2026 returned 15 search tracks, three Home shelves and 140,231 bytes of SABR media for Adele's Hello. This verifies public service access and audio delivery. It does not prove device playback or account authentication. Actual browser-account sign-in, personalized Home, Android device playback and the desktop audio output still need manual verification.
+
+Live tests are opt-in and do not run in ordinary builds or CI:
+
+```powershell
+$env:METROFUSE_LIVE_YTM = "1"
+./gradlew.bat :native:desktopTest --tests dev.metrofuse.youtube.YouTubeLiveTest "-PmetrofuseApiJar=C:\path\to\plugin-api-desktop-1.1.0.jar"
+```
+
+Only the initial search and catalog browse pages are exposed. Pagination, account/channel switching, music videos and library mutation are not implemented. Home uses service-provided shelf titles and excludes shelves linked to `FEmusic_library`.
+
+The host must include the SABR plugin transport adapter for native audio. The adapter reconstructs the session using host-owned InnerTubeX classes. Plugin-owned InnerTubeX objects never cross the plugin API.
+
+## Attribution
+
+Catalog parsing and initial provider integration were adapted from MetroList at commit `e97197786c2a7ad56279cc9bb4ce3233ef6c99ff`. This standalone implementation and its account, Home and transport work are maintained by 956tris. See [LICENSE](LICENSE), [native provenance](native/SOURCE) and [JavaScript provenance](universal/SOURCE).
+
+Plugin API documentation is in [MetroFuse-Plugin-Docs](https://github.com/956tris/MetroFuse-Plugin-Docs).

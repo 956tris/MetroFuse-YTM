@@ -1,0 +1,21 @@
+[versions]
+kotlin = "2.4.21"
+compose = "1.13.0-beta02"
+coroutines = "1.11.0"
+serialization = "1.12.0"
+
+[libraries]
+ktor-client-core = { module = "io.ktor:ktor-client-core", version = "3.6.1" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version = "3.6.1" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version = "3.6.1" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version = "3.6.1" }
+ktor-serialization-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version = "3.6.1" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose" }
+foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose" }
+material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose" }
+
+[plugins]
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

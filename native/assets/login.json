@@ -1,0 +1,4 @@
+{
+  "label": "YouTube Music cookie header",
+  "instructions": "Sign in to music.youtube.com in your browser, then copy the Cookie request header from a music.youtube.com request in the browser's developer tools. Paste the complete header here. MetroFuse verifies the account and stores this provider's credentials encrypted on this device. Do not share your cookies."
+}

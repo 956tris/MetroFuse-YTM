@@ -8,12 +8,7 @@ The universal `youtube-music.mfp` provides sign-in, Home, catalog and direct aud
 
 ## Account sign-in
 
-Open MetroFuse's profile menu and select Login. App Settings remains available for every provider, including providers without login support.
-
-This provider uses cookie authentication. Sign in to `music.youtube.com` in your browser, open the browser's developer tools, and copy the Cookie request header from a request to that site. Paste the complete header into the provider's login form. The provider verifies an active YouTube account before accepting it. A failed verification preserves the previous valid session.
-
-Credentials stay with this provider and are stored by the host using Windows DPAPI or Android Keystore encryption. They do not go into ordinary plugin settings or this repository. Linux and macOS encrypted credential persistence is not implemented by the current host. Cookies grant access to your account, so do not share them or put them in issues or logs. Log out from the same profile menu to clear the provider session.
-
+webview g
 ## Build from source
 
 Use Java 25, Gradle 9.8.2, Kotlin 2.4.21 and the matching MetroFuse API JAR. Build that API with `:plugin-api:desktopJar` from the MetroFuse KMP source. Set `ANDROID_HOME` to an SDK containing platform `android-37.0` and build tools `37.0.0` for APK packaging.

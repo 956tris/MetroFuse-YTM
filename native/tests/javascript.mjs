@@ -96,6 +96,13 @@ assert.equal((await providers.home({language:'fr',country:'FR'}))[0].items[0].tr
 assert.equal((await providers.login.request()).fields[0].id,'cookie');
 assert.equal((await providers.login.ui()).request.cookieUrl,'https://music.youtube.com');
 assert.match((await providers.login.ui()).request.url,/^https:\/\/accounts\.google\.com\//);
+const {request: signIn} = await providers.login.ui();
+for (const url of [
+  'https://accounts.youtube.com/accounts/SetSID',
+  'https://youtube.com/signin',
+  'https://consent.youtube.com/',
+  'https://music.youtube.com/'
+]) assert.ok(signIn.allowedHosts.includes(new URL(url).hostname), url);
 assert.equal((await providers.login.ui()).labels.title,'YouTube Music');
 assert.equal(providers.login.web, undefined);
 await providers.login.login({values:{cookie:'SAPISID=fixture'}});

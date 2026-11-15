@@ -93,7 +93,10 @@ class YouTubeMusicPlugin :
             allowedHosts =
                 listOf(
                     "music.youtube.com",
+                    "youtube.com",
                     "www.youtube.com",
+                    "accounts.youtube.com",
+                    "consent.youtube.com",
                     "accounts.google.com",
                     "consent.google.com",
                     "myaccount.google.com",

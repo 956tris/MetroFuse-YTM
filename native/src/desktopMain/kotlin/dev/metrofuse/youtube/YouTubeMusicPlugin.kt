@@ -1,5 +1,6 @@
 package dev.metrofuse.youtube
 
+import androidx.compose.runtime.Composable
 import com.metrolist.innertubex.InnerTube
 import com.metrolist.innertubex.bodyAsJsonObjectLimited
 import com.metrolist.innertubex.cipher.PlayerConfigRepository
@@ -22,10 +23,13 @@ import dev.metrofuse.api.HomePlugin
 import dev.metrofuse.api.HomeRequest
 import dev.metrofuse.api.LoginCredentials
 import dev.metrofuse.api.LoginField
+import dev.metrofuse.api.LoginPlugin
 import dev.metrofuse.api.LoginRequest
+import dev.metrofuse.api.LoginUiContext
 import dev.metrofuse.api.MetadataContribution
 import dev.metrofuse.api.MetadataRequest
 import dev.metrofuse.api.MetadataSource
+import dev.metrofuse.api.NativeLoginUi
 import dev.metrofuse.api.NativePlugin
 import dev.metrofuse.api.PluginContext
 import dev.metrofuse.api.PluginLoginState
@@ -37,8 +41,10 @@ import dev.metrofuse.api.SearchResult
 import dev.metrofuse.api.StreamDescriptor
 import dev.metrofuse.api.StreamTransport
 import dev.metrofuse.api.TrackIdentity
-import dev.metrofuse.api.WebLoginPlugin
 import dev.metrofuse.api.WebLoginRequest
+import dev.metrofuse.sdk.WebViewLabels
+import dev.metrofuse.sdk.WebViewLoginScreen
+import dev.metrofuse.sdk.WebViewLoginUi
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -59,19 +65,26 @@ import java.util.Locale
 // The provider owns its network client and account session for each activation.
 class YouTubeMusicPlugin :
     NativePlugin,
-    WebLoginPlugin,
+    LoginPlugin,
+    NativeLoginUi,
     HomePlugin {
     private var client: HttpClient? = null
     private var innerTube: InnerTube? = null
     private var cipherService: YouTubeCipherService? = null
     private var session: YouTubeSession? = null
     private var request: LoginRequest? = null
+    private var accountScreen: WebViewLoginScreen? = null
     private val signedOut = MutableStateFlow(PluginLoginState())
     override val loginState: StateFlow<PluginLoginState> get() = session?.loginState ?: signedOut
 
     override suspend fun loginRequest() = request
 
-    override suspend fun webLoginRequest() =
+    @Composable
+    override fun Content(context: LoginUiContext) {
+        checkNotNull(accountScreen).Content(context)
+    }
+
+    private fun browserRequest() =
         WebLoginRequest(
             url = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com",
             cookieUrl = "https://music.youtube.com",
@@ -136,6 +149,23 @@ class YouTubeMusicPlugin :
                 fields = listOf(LoginField("cookie", requireNotNull((strings["label"] as? JsonPrimitive)?.contentOrNull))),
                 instructions = requireNotNull((strings["instructions"] as? JsonPrimitive)?.contentOrNull),
             )
+
+        fun label(key: String) = requireNotNull((strings[key] as? JsonPrimitive)?.contentOrNull)
+        accountScreen =
+            WebViewLoginScreen(
+                WebViewLoginUi(
+                    browserRequest(),
+                    WebViewLabels(
+                        title = label("title"),
+                        hint = label("instructions"),
+                        error = label("error"),
+                        retry = label("retry"),
+                        cancel = label("cancel"),
+                        login = label("login"),
+                        logout = label("logout"),
+                    ),
+                ),
+            )
         val catalog = GuestCatalog(tube, musicClient)
         context.registerSearchProvider(catalog)
         context.registerCatalogProvider(catalog)
@@ -147,6 +177,7 @@ class YouTubeMusicPlugin :
         session?.logout()
         session = null
         request = null
+        accountScreen = null
         try {
             cipherService?.dispose()
         } finally {

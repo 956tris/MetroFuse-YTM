@@ -1,4 +1,10 @@
 {
   "label": "YouTube Music session",
-  "instructions": "Sign in to YouTube Music in the browser window. MetroFuse will finish automatically and store this provider's session encrypted on this device."
+  "instructions": "Sign in to YouTube Music in the browser window. MetroFuse will finish automatically and store this provider's session encrypted on this device.",
+  "title": "YouTube Music",
+  "error": "Could not sign in. Please try again.",
+  "retry": "Try again",
+  "cancel": "Cancel",
+  "login": "Sign in",
+  "logout": "Sign out"
 }

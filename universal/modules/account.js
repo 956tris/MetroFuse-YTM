@@ -10,6 +10,15 @@ export const webLoginRequest = {
   allowedHosts: ['music.youtube.com','www.youtube.com','accounts.google.com','consent.google.com','myaccount.google.com','www.google.com']
 };
 
+export const loginUi = {
+  request: webLoginRequest,
+  labels: {
+    title: 'YouTube Music', hint: loginRequest.instructions,
+    error: 'Could not sign in. Please try again.', retry: 'Try again',
+    cancel: 'Cancel', login: 'Sign in', logout: 'Sign out'
+  }
+};
+
 export function validateCookie(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 16384 || /[\r\n]/.test(value)) throw Error('INVALID_COOKIE');
   const cookie = value.trim();

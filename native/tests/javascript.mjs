@@ -94,8 +94,10 @@ assert.equal((await providers.audio({identity:{canonicalId:'abcdefghijk'},qualit
 assert.equal(requests.filter(request => request.url.endsWith('/sw.js_data')).length,1);
 assert.equal((await providers.home({language:'fr',country:'FR'}))[0].items[0].track.id,'abcdefghijk');
 assert.equal((await providers.login.request()).fields[0].id,'cookie');
-assert.equal((await providers.login.web()).cookieUrl,'https://music.youtube.com');
-assert.match((await providers.login.web()).url,/^https:\/\/accounts\.google\.com\//);
+assert.equal((await providers.login.ui()).request.cookieUrl,'https://music.youtube.com');
+assert.match((await providers.login.ui()).request.url,/^https:\/\/accounts\.google\.com\//);
+assert.equal((await providers.login.ui()).labels.title,'YouTube Music');
+assert.equal(providers.login.web, undefined);
 await providers.login.login({values:{cookie:'SAPISID=fixture'}});
 authenticated = true;
 assert.equal(providers.account.accountName,'Fixture account');

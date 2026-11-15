@@ -5,6 +5,7 @@ import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.compose.compiler)
 }
 
 val innerTubeXVersion = providers.gradleProperty("innerTubeXVersion").get()
@@ -18,6 +19,10 @@ kotlin {
     sourceSets {
         getByName("desktopMain").dependencies {
             compileOnly(files(providers.gradleProperty("metrofuseApiJar").map { file(it) }))
+            compileOnly(files(providers.gradleProperty("metrofuseSdkJar").map { file(it) }))
+            compileOnly(libs.runtime)
+            compileOnly(libs.foundation)
+            compileOnly(libs.material3)
             compileOnly(libs.ktor.client.core)
             compileOnly(libs.ktor.client.content.negotiation)
             compileOnly(libs.ktor.serialization.json)
@@ -26,6 +31,10 @@ kotlin {
         }
         getByName("desktopTest").dependencies {
             implementation(files(providers.gradleProperty("metrofuseApiJar").map { file(it) }))
+            implementation(files(providers.gradleProperty("metrofuseSdkJar").map { file(it) }))
+            implementation(libs.runtime)
+            implementation(libs.foundation)
+            implementation(libs.material3)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.content.negotiation)

@@ -16,17 +16,17 @@ The host stores this provider's accepted session with Windows DPAPI or Android K
 
 ## Build from source
 
-Use Java 25, Gradle 9.8.2, Kotlin 2.4.21 and the matching MetroFuse API JAR. Build that API with `:plugin-api:desktopJar` from the MetroFuse KMP source. Set `ANDROID_HOME` to an SDK containing platform `android-37.0` and build tools `37.0.0` for APK packaging.
+Use Java 25, Gradle 9.8.2, Kotlin 2.4.21 and the matching MetroFuse API and plugin SDK JARs. Export them with `:plugin-api:desktopJar :plugin-sdk:desktopJar` from the MetroFuse KMP source. The SDK's Windows browser build requires .NET SDK 10; set `-PdotnetExecutable` if it is outside PATH. Set `ANDROID_HOME` to an SDK containing platform `android-37.0` and build tools `37.0.0` for APK packaging.
 
 ```powershell
-./gradlew.bat :native:desktopTest :native:packagePluginJar :native:packagePluginApk "-PmetrofuseApiJar=C:\path\to\plugin-api-desktop-1.1.0.jar" --no-configuration-cache
+./gradlew.bat :native:desktopTest :native:packagePluginJar :native:packagePluginApk "-PmetrofuseApiJar=C:\path\to\plugin-api-desktop-1.1.0.jar" "-PmetrofuseSdkJar=C:\path\to\plugin-sdk-desktop-1.1.0.jar" --no-configuration-cache
 python tools/package-mfp.py
 node native/tests/javascript.mjs
 ```
 
 Native outputs are in `native/build/outputs/plugins/`. The MFP is in `build/outputs/plugins/`. Compiled downloads and SHA256SUMS belong in Releases and are ignored by Git.
 
-The native packages bundle InnerTubeX and QuackJS. The host supplies the MetroFuse API, Kotlin, coroutines, serialization, Ktor and Compose. The native plugin uses Ktor's platform engine discovery and does not reference desktop-only CIO classes in production Android code.
+The native packages bundle InnerTubeX and QuackJS. The host supplies the MetroFuse API and plugin SDK, Kotlin, coroutines, serialization, Ktor and Compose. SDK classes stay on the compile and test classpaths and are excluded from plugin artifacts. The native plugin uses Ktor's platform engine discovery and does not reference desktop-only CIO classes in production Android code.
 
 ## Verification and limits
 
@@ -38,12 +38,14 @@ Live tests are opt-in and do not run in ordinary builds or CI:
 
 ```powershell
 $env:METROFUSE_LIVE_YTM = "1"
-./gradlew.bat :native:desktopTest --tests dev.metrofuse.youtube.YouTubeLiveTest "-PmetrofuseApiJar=C:\path\to\plugin-api-desktop-1.1.0.jar"
+./gradlew.bat :native:desktopTest --tests dev.metrofuse.youtube.YouTubeLiveTest "-PmetrofuseApiJar=C:\path\to\plugin-api-desktop-1.1.0.jar" "-PmetrofuseSdkJar=C:\path\to\plugin-sdk-desktop-1.1.0.jar"
 ```
 
 Only the initial search and catalog browse pages are exposed. Pagination, account/channel switching, music videos and library mutation are not implemented. Home uses service-provided shelf titles and excludes shelves linked to `FEmusic_library`.
 
-The host must include the plugin WebView sign-in support and SABR transport adapter. Native sign-in uses the optional `WebLoginPlugin` interface, while MFP sign-in uses `host.login({request, web, login, logout})`. The browser request declares the login URL, cookie origin, required session-cookie names and allowed navigation hosts. Existing `LoginPlugin` and `LoginRequest` binaries retain their ABI. The SABR adapter reconstructs the session using host-owned InnerTubeX classes. Plugin-owned InnerTubeX objects never cross the plugin API.
+YTM owns its entire account screen, Google navigation rules, labels, verification and account session. The native plugin implements `NativeLoginUi` and uses `dev.metrofuse.sdk.WebViewLoginScreen`. MFP supplies the SDK screen through `host.login({request, ui, login, logout})`; `ui()` returns `{request, labels}`. The reusable Android WebView, desktop WebView and Windows helper live in `plugin-sdk`. MetroFuse hosts the contributed screen and stores accepted credentials through the generic plugin lifecycle. Its platform account menus contain no YTM browser implementation. Existing `LoginPlugin`, `LoginRequest` and legacy browser callbacks retain compatibility.
+
+Use a host containing `plugin-sdk` and the SABR transport adapter. The SABR adapter reconstructs the session using host-owned InnerTubeX classes. Plugin-owned InnerTubeX objects never cross the plugin API.
 
 ## Attribution
 

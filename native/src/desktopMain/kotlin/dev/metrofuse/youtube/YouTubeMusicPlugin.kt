@@ -81,7 +81,7 @@ class YouTubeMusicPlugin :
 
     @Composable
     override fun Content(context: LoginUiContext) {
-        checkNotNull(accountScreen).Content(context)
+        accountScreen?.Content(context)
     }
 
     private fun browserRequest() =

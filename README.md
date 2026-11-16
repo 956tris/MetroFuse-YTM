@@ -36,6 +36,8 @@ node native/tests/javascript.mjs
 
 Native outputs are in `native/build/outputs/plugins/`. The MFP is in `build/outputs/plugins/`. Compiled downloads and SHA256SUMS belong in Releases and are ignored by Git.
 
+The Release YouTube Music plugin action publishes the packages from a successful main build. It runs after Build YouTube Music plugin completes, or can be started manually with that build's run ID. It uses the existing artifacts, checks their versions and checksums, and publishes `v<manifest version>` with the JAR, APK, MFP and SHA256SUMS. Published versions are kept unchanged; update both manifests when releasing a new version. Failed draft uploads can be retried.
+
 The native packages bundle InnerTubeX and QuackJS. The host supplies the MetroFuse API and plugin SDK, Kotlin, coroutines, serialization, Ktor and Compose. SDK classes stay on the compile and test classpaths and are excluded from plugin artifacts. The native plugin uses Ktor's platform engine discovery and does not reference desktop-only CIO classes in production Android code.
 
 ## Verification and limits

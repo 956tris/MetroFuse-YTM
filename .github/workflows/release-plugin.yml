@@ -1,0 +1,141 @@
+name: Release YouTube Music plugin
+
+on:
+  workflow_run:
+    workflows: [Build YouTube Music plugin]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful main build run to release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: youtube-music-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Select the successful build
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.build_run_id }}
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/ytm-build.json"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          run = json.loads((Path(os.environ['RUNNER_TEMP']) / 'ytm-build.json').read_text())
+          repository = os.environ['GITHUB_REPOSITORY']
+          if (run['status'] != 'completed' or run['conclusion'] != 'success'
+              or run['event'] not in ('push', 'workflow_dispatch')
+              or run['head_branch'] != 'main'
+              or run['repository']['full_name'] != repository
+              or run['head_repository']['full_name'] != repository
+              or run['path'] != '.github/workflows/build-plugin.yml'
+              or not re.fullmatch(r'[0-9a-f]{40}', run['head_sha'])):
+              raise SystemExit('Release requires a successful main plugin build from this repository')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"run_id={run['id']}\nsha={run['head_sha']}\n")
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.build.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: youtube-music-plugin
+          path: build/distribution
+          run-id: ${{ steps.build.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Prepare the release
+        id: package
+        env:
+          BUILD_SOURCE_SHA: ${{ steps.build.outputs.sha }}
+          SOURCE_RUN_ID: ${{ steps.build.outputs.run_id }}
+        run: |
+          (cd build/distribution && sha256sum --strict --check SHA256SUMS)
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          native = json.loads(Path('native/manifest.json').read_text())
+          universal = json.loads(Path('universal/manifest.json').read_text())
+          version = native['version']
+          if version != universal['version'] or not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', version):
+              raise SystemExit('Native and JavaScript manifests must have the same release version')
+          distribution = Path('build/distribution')
+          for name, manifest in (
+              ('youtube-music.jar', 'manifest.json'),
+              ('youtube-music.apk', 'assets/metrofuse/manifest.json'),
+              ('youtube-music.mfp', 'manifest.json'),
+          ):
+              with ZipFile(distribution / name) as archive:
+                  packaged = json.loads(archive.read(manifest))
+              if packaged['id'] != native['id'] or packaged['version'] != version:
+                  raise SystemExit(f'{name} does not match the build source')
+          sdk = re.search(r'^\s+ref:\s+([0-9a-f]{40})\s*$', Path('.github/workflows/build-plugin.yml').read_text(), re.MULTILINE)
+          if sdk is None:
+              raise SystemExit('Build must pin the MetroFuse SDK source')
+          repository = os.environ['GITHUB_REPOSITORY']
+          sha = os.environ['BUILD_SOURCE_SHA']
+          run_id = os.environ['SOURCE_RUN_ID']
+          notes = (
+              'Install `youtube-music.jar` on desktop or `youtube-music.apk` on Android through MetroFuse Plugins. '
+              '`youtube-music.mfp` is the JavaScript implementation. Install one implementation at a time.\n\n'
+              f'Built from [{sha[:8]}](https://github.com/{repository}/commit/{sha}) by '
+              f'[GitHub Actions](https://github.com/{repository}/actions/runs/{run_id}). '
+              f'Use a MetroFuse build containing the matching [KMP SDK](https://github.com/956tris/MetroFuse/commit/{sdk.group(1)}).\n'
+          )
+          (distribution / 'RELEASE_NOTES.md').write_text(notes)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\ntag=v{version}\n')
+          PY
+      - name: Publish the plugin packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.package.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.package.outputs.version }}
+          BUILD_SOURCE_SHA: ${{ steps.build.outputs.sha }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > "$RUNNER_TEMP/ytm-release-draft"; then
+            if [[ "$(cat "$RUNNER_TEMP/ytm-release-draft")" != 'true' ]]; then
+              echo "Release $RELEASE_TAG is already published."
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --target "$BUILD_SOURCE_SHA" \
+              --title "YouTube Music $RELEASE_VERSION" --draft \
+              --notes-file build/distribution/RELEASE_NOTES.md
+          fi
+          gh release upload "$RELEASE_TAG" \
+            build/distribution/youtube-music.jar \
+            build/distribution/youtube-music.apk \
+            build/distribution/youtube-music.mfp \
+            build/distribution/SHA256SUMS --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest \
+            --notes-file build/distribution/RELEASE_NOTES.md

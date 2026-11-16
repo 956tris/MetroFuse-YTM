@@ -15,6 +15,37 @@ const expectedHash=createHash('sha1').update('1700000000 fixture https://music.y
 assert.equal(account.authorization('SAPISID=fixture',1700000000000),'SAPISIDHASH 1700000000_'+expectedHash);
 assert.throws(() => account.validateCookie('SAPISID=fixture\r\nInvalid: secret'));
 const fixture = JSON.parse(await fs.readFile(new URL('../src/desktopTest/resources/youtube-search.json',import.meta.url)));
+const radioResponse = JSON.parse(await fs.readFile(new URL('../src/desktopTest/resources/youtube-radio.json',import.meta.url)));
+const homeResponse = JSON.parse(await fs.readFile(new URL('../src/desktopTest/resources/youtube-home.json',import.meta.url)));
+const homeContinuationResponse = JSON.parse(await fs.readFile(new URL('../src/desktopTest/resources/youtube-home-continuation.json',import.meta.url)));
+const libraryResponse = JSON.parse(await fs.readFile(new URL('../src/desktopTest/resources/youtube-library.json',import.meta.url)));
+const libraryContinuationResponse = JSON.parse(await fs.readFile(new URL('../src/desktopTest/resources/youtube-library-continuation.json',import.meta.url)));
+assert.equal(catalog.library(libraryResponse).continuation,'library-next');
+assert.deepEqual(catalog.library(libraryResponse).items.map(item=>Object.keys(item)[0]),['track','album','artist','playlist']);
+assert.equal(catalog.library(libraryContinuationResponse).items[0].track.id,'lmnopqrstuv');
+assert.equal(catalog.library(libraryContinuationResponse).continuation,null);
+assert.throws(()=>catalog.library({}),/LIBRARY_CONTENTS_MISSING/);
+const radioPanel = radioResponse.contents.singleColumnMusicWatchNextResultsRenderer.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0].tabRenderer.content.musicQueueRenderer.content.playlistPanelRenderer;
+const continuedRadio = {continuationContents:{playlistPanelContinuation:radioPanel}};
+for (const root of [radioResponse,continuedRadio]) {
+  const result = catalog.radio(root);
+  assert.deepEqual(result.tracks.map(value => value.id),['abcdefghijk','lmnopqrstuv']);
+  assert.equal(result.continuation,'radio-next');
+  assert.equal(result.tracks[1].duration,241000);
+  assert.equal(result.tracks[1].artwork,'https://example.org/related.jpg');
+  assert.equal(result.tracks[1].extras.musicVideoType,'MUSIC_VIDEO_TYPE_ATV');
+  assert.equal(result.tracks[1].extras.explicit,'true');
+}
+assert.deepEqual(catalog.home(homeResponse).map(value => value.title),['Listen again','Quick picks']);
+assert.equal(catalog.homeContinuation(homeResponse),'home-next');
+const moreHome = catalog.home(homeContinuationResponse);
+assert.deepEqual(moreHome.map(value => value.title),['New releases','Mixes for you','Artists for you','Featured recommendation']);
+assert.equal(moreHome[0].items[0].album.id,'MPREfixture');
+assert.equal(moreHome[1].items[0].playlist.id,'RDCLAKfixture');
+assert.equal(moreHome[1].items[0].playlist.artwork,'https://example.org/mix.jpg');
+assert.equal(moreHome[2].items[0].artist.id,'UCfixture');
+assert.equal(moreHome[3].items[0].track.id,'wxyz0123456');
+assert.equal(catalog.homeContinuation(homeContinuationResponse),null);
 const results = catalog.search(fixture,10);
 assert.equal(results.tracks.length,1);
 assert.equal(results.tracks[0].extras.albumId,'MPREfixture');
@@ -61,7 +92,7 @@ const settings = {audioEnabled:true,contentLanguage:'es-ES',contentCountry:'ES'}
 const providers = {}, requests = [];
 let authenticated = false;
 let validAccount = true;
-const homeResponse = {contents:{musicCarouselShelfRenderer:{header:{musicCarouselShelfBasicHeaderRenderer:{title:{runs:[{text:'Recommendations'}]}}},contents:[{musicTwoRowItemRenderer:{title:{runs:[{text:'Fixture song'}]},navigationEndpoint:{watchEndpoint:{videoId:'abcdefghijk'}}}}]}}};
+let failLibraryCategory = false;
 const host = {
   login(callbacks) { providers.login=callbacks; },
   loginState(state) { providers.account=state; },
@@ -80,10 +111,34 @@ const host = {
       assert.match(request.headers.Authorization,/^SAPISIDHASH [0-9]+_[a-f0-9]{40}$/);
       return {status:200,headers:{},body:JSON.stringify(validAccount ? {activeAccountHeaderRenderer:{accountName:{runs:[{text:'Fixture account'}]}}} : {})};
     }
-    assert.equal(body.context.client.hl,body.browseId === 'FEmusic_home' ? 'fr' : 'es-ES');
-    assert.equal(body.context.client.gl,body.browseId === 'FEmusic_home' ? 'FR' : 'ES');
+    const isHome = body.browseId === 'FEmusic_home' || body.continuation === 'home-next';
+    assert.equal(body.context.client.hl,isHome ? 'fr' : 'es-ES');
+    assert.equal(body.context.client.gl,isHome ? 'FR' : 'ES');
     assert.equal(request.headers.Cookie,authenticated ? 'SAPISID=fixture' : undefined);
+    if (body.browseId==='FEmusic_liked_videos') return {status:200,headers:{},body:JSON.stringify(libraryResponse)};
+    if (body.continuation==='library-next') {
+      assert.equal(body.browseId,undefined);
+      return {status:200,headers:{},body:JSON.stringify(libraryContinuationResponse)};
+    }
+    if (['FEmusic_liked_albums','FEmusic_library_corpus_artists','FEmusic_liked_playlists'].includes(body.browseId)) {
+      return failLibraryCategory && body.browseId==='FEmusic_liked_albums' ? {status:503,body:'{}'}
+        : {status:200,headers:{},body:'{"contents":{"sectionListRenderer":{"contents":[]}}}'};
+    }
     if (body.browseId === 'FEmusic_home') return {status:200,headers:{},body:JSON.stringify(homeResponse)};
+    if (body.continuation === 'home-next') {
+      assert.equal(body.browseId,undefined);
+      return {status:200,headers:{},body:JSON.stringify(homeContinuationResponse)};
+    }
+    if (request.url.includes('/next')) {
+      if (body.continuation) {
+        assert.equal(body.continuation,'radio-next');
+        assert.equal(body.videoId,undefined);
+        return {status:200,headers:{},body:JSON.stringify(continuedRadio)};
+      }
+      assert.equal(body.videoId,'abcdefghijk');
+      assert.equal(body.playlistId,'RDAMVMabcdefghijk');
+      return {status:200,headers:{},body:JSON.stringify(radioResponse)};
+    }
     return {status:200,headers:{},body:JSON.stringify(request.url.includes('/player') ? player : fixture)};
   }
 };
@@ -92,26 +147,64 @@ assert.equal((await providers.search({query:'Fixture',limit:10})).tracks[0].titl
 assert.equal((await providers.catalog.playlist('PLfixture')).tracks.length,2);
 assert.equal((await providers.audio({identity:{canonicalId:'abcdefghijk'},quality:{preset:'HIGH'}})).stream.codec,'opus');
 assert.equal(requests.filter(request => request.url.endsWith('/sw.js_data')).length,1);
-assert.equal((await providers.home({language:'fr',country:'FR'}))[0].items[0].track.id,'abcdefghijk');
+const homePage = await providers.home({language:'fr',country:'FR'});
+assert.equal(homePage.shelves[0].items[0].track.id,'abcdefghijk');
+assert.equal(homePage.continuation,'home-next');
+assert.equal((await providers.home({language:'fr',country:'FR',continuation:homePage.continuation})).shelves.length,4);
+const recommendations = await providers.catalog.recommendations({identity:{canonicalId:'abcdefghijk'}});
+assert.deepEqual(recommendations.tracks.map(value => value.id),['abcdefghijk','lmnopqrstuv']);
+assert.equal((await providers.catalog.recommendations({identity:{canonicalId:'abcdefghijk'},continuation:recommendations.continuation})).tracks.length,2);
+const beforeForeign = requests.length;
+assert.deepEqual(await providers.catalog.recommendations({identity:{canonicalId:'abcdefghijk',identifiers:{pluginOwner:'foreign'}}}),{tracks:[]});
+assert.equal(requests.length,beforeForeign);
 assert.equal((await providers.login.request()).fields[0].id,'cookie');
 assert.equal((await providers.login.ui()).request.cookieUrl,'https://music.youtube.com');
 assert.match((await providers.login.ui()).request.url,/^https:\/\/accounts\.google\.com\//);
+const {request: signIn} = await providers.login.ui();
+for (const url of [
+  'https://accounts.google.co.uk/accounts/SetSID',
+  'https://accounts.youtube.com/accounts/SetSID',
+  'https://youtube.com/signin',
+  'https://consent.youtube.com/',
+  'https://music.youtube.com/'
+]) assert.ok(signIn.allowedHosts.includes(new URL(url).hostname), url);
 assert.equal((await providers.login.ui()).labels.title,'YouTube Music');
 assert.equal(providers.login.web, undefined);
 await providers.login.login({values:{cookie:'SAPISID=fixture'}});
 authenticated = true;
 assert.equal(providers.account.accountName,'Fixture account');
 await providers.search({query:'Fixture',limit:10});
+await providers.catalog.recommendations({identity:{canonicalId:'abcdefghijk'}});
+const libraryStart=requests.length;
+let libraryPage=await providers.catalog.library({language:'es-ES',country:'ES'});
+const libraryItems=[...libraryPage.items];
+while (libraryPage.continuation) {
+  libraryPage=await providers.catalog.library({language:'es-ES',country:'ES',continuation:libraryPage.continuation});
+  assert.equal(libraryPage.complete,true);
+  libraryItems.push(...libraryPage.items);
+}
+assert.deepEqual(libraryItems.filter(item=>item.track).map(item=>item.track.id),['abcdefghijk','lmnopqrstuv']);
+assert.deepEqual(requests.slice(libraryStart).map(request=>JSON.parse(request.body).browseId).filter(Boolean),
+  ['FEmusic_liked_videos','FEmusic_liked_albums','FEmusic_library_corpus_artists','FEmusic_liked_playlists']);
+failLibraryCategory=true;
+const failedLibrary=await providers.catalog.library({language:'es-ES',country:'ES',continuation:'ytm-library:{"section":1}'});
+assert.equal(failedLibrary.complete,false);
+assert.ok(failedLibrary.continuation);
+failLibraryCategory=false;
+await assert.rejects(providers.catalog.library({continuation:'invalid'}),/INVALID_CONTINUATION/);
 validAccount = false;
 await assert.rejects(providers.login.login({values:{cookie:'SAPISID=fixture'}}),/ACCOUNT_VERIFICATION_FAILED/);
 assert.equal(providers.account.loggedIn,true);
 await providers.login.logout();
 authenticated = false;
 assert.equal(providers.account.loggedIn,false);
+const signedOutLibraryRequests=requests.length;
+assert.deepEqual(await providers.catalog.library({language:'es-ES',country:'ES'}),{items:[],complete:true});
+assert.equal(requests.length,signedOutLibraryRequests);
 await providers.search({query:'Fixture',limit:10});
 settings.audioEnabled = false;
 const requestCount = requests.length;
 assert.equal((await providers.audio({identity:{canonicalId:'abcdefghijk'}})).error.code,'AUDIO_DISABLED');
 assert.equal(requests.length,requestCount);
 globalThis.plugin.dispose();
-console.log('YouTube Music JS production callbacks, locale, catalog, identity, direct audio, quality and supported/unsupported signature fixtures passed.');
+console.log('YouTube Music JS production callbacks, paginated Home and library, recommendations, locale, catalog, identity, direct audio, quality and supported/unsupported signature fixtures passed.');

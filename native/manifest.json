@@ -1,7 +1,7 @@
 {
   "id": "metrofuse.youtube-music",
   "name": "YouTube Music",
-  "version": "1.1.2",
+  "version": "1.1.5",
   "author": "MetroFuse and MetroList contributors",
   "runtime": "kotlin",
   "api": "1.1.0",
@@ -9,6 +9,6 @@
   "entryClass": "dev.metrofuse.youtube.YouTubeMusicPlugin",
   "capabilities": ["audio", "search", "catalog", "metadata", "settings", "login", "home"],
   "home": {"title": "YouTube Music"},
-  "description": "YouTube Music catalog, account sign-in, Home and audio through InnerTubeX.",
+  "description": "YouTube Music catalog, recommendations, account sign-in, paginated Home and Library, and audio through InnerTubeX.",
   "settings": [{"key": "audioEnabled", "title": "Resolve YouTube Music audio", "type": "BOOLEAN", "default": true}]
 }

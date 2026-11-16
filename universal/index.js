@@ -1,5 +1,5 @@
 /* MetroFuse contributors, GPL-3.0. See SOURCE for provenance and limits. */
-import {videoId,search,page,home,accountName} from './modules/catalog.js';
+import {videoId,search,page,home,homeContinuation,radio,library,accountName} from './modules/catalog.js';
 import {jsonValue,guestMusicContext,selectAudio,signaturePlan} from './modules/media.js';
 import {loginRequest,loginUi,validateCookie,authorization} from './modules/account.js';
 
@@ -81,6 +81,34 @@ async function browse(id, type) {
   return page(await api('browse',{browseId}),id,type);
 }
 
+const LIBRARY_CATEGORIES=['FEmusic_liked_videos','FEmusic_liked_albums','FEmusic_library_corpus_artists','FEmusic_liked_playlists'];
+async function accountLibrary(request) {
+  const session=cookie;
+  if (!session) return {items:[],complete:true};
+  const categories=request.likedSongsOnly ? ['VLLM'] : LIBRARY_CATEGORIES;
+  const prefix=request.likedSongsOnly ? 'ytm-likes:' : 'ytm-library:';
+  let cursor={section:0};
+  if (request.continuation != null) {
+    if (typeof request.continuation!=='string' || !request.continuation.startsWith(prefix) || request.continuation.length>16384) throw Error('INVALID_CONTINUATION');
+    cursor=JSON.parse(request.continuation.slice(prefix.length));
+    if (!Number.isInteger(cursor.section) || cursor.section<0 || cursor.section>=categories.length ||
+      (cursor.token!=null && (typeof cursor.token!=='string' || !cursor.token.trim()))) throw Error('INVALID_CONTINUATION');
+  }
+  let result;
+  try {
+    result=library(await api('browse',cursor.token ? {continuation:cursor.token} : {browseId:categories[cursor.section]},null,session,request));
+  } catch (error) {
+    if (cookie!==session) throw Error('ACCOUNT_CHANGED');
+    result={items:[],complete:false};
+  }
+  if (cookie!==session) throw Error('ACCOUNT_CHANGED');
+  const next=result.continuation ? {section:cursor.section,token:result.continuation}
+    : cursor.section+1<categories.length ? {section:cursor.section+1} : null;
+  const items=request.likedSongsOnly ? result.items.map(item => item.track
+    ? {...item,track:{...item.track,extras:{...item.track.extras,likeStatus:'LIKE'}}} : item) : result.items;
+  return {...result,items,continuation:next ? prefix+JSON.stringify(next) : null};
+}
+
 globalThis.plugin = {
   async init(context) {
     host = context;
@@ -99,10 +127,37 @@ globalThis.plugin = {
       },
       logout: async () => { cookie=null; players.clear(); host.loginState({loggedIn:false}); }
     });
-    host.home(async request => home(await api('browse',{browseId:'FEmusic_home'},null,cookie,request)));
+    host.home(async request => {
+      const session = cookie;
+      const response = await api('browse',request.continuation ? {continuation:request.continuation} : {browseId:'FEmusic_home'},null,session,request);
+      if (cookie !== session) throw Error('ACCOUNT_CHANGED');
+      return {shelves:home(response),continuation:homeContinuation(response)};
+    });
     host.search('youtube-music.search',async request => String(request.query ?? '').trim()
       ? search(await api('search',{query:request.query}),request.limit) : {tracks:[]});
-    host.catalog('youtube-music.catalog',{album:id => browse(id,'album'),artist:id => browse(id,'artist'),playlist:id => browse(id,'playlist')});
+    host.catalog('youtube-music.catalog',{
+      album:id => browse(id,'album'),artist:id => browse(id,'artist'),playlist:id => browse(id,'playlist'),
+      library:accountLibrary,
+      supportsLikedSongs:true,
+      setSongVote:async request => {
+        const id=videoId({canonicalId:request.trackId}), session=cookie;
+        if (!id || !session) return false;
+        if (!['LIKE','DISLIKE','INDIFFERENT'].includes(request.vote)) throw Error('INVALID_VOTE');
+        const method={LIKE:'like/like',DISLIKE:'like/dislike',INDIFFERENT:'like/removelike'}[request.vote];
+        const response=await api(method,{target:{videoId:id}},null,session);
+        if (cookie!==session) throw Error('ACCOUNT_CHANGED');
+        return !response.error && response.responseContext?.mainAppWebResponseContext?.loggedOut!==true;
+      },
+      recommendations:async request => {
+        const id = videoId(request.identity);
+        if (!id) return {tracks:[]};
+        if (request.continuation != null && (typeof request.continuation !== 'string' || request.continuation.length > 16384)) throw Error('INVALID_CONTINUATION');
+        const session = cookie;
+        const response = radio(await api('next',request.continuation ? {continuation:request.continuation} : {videoId:id,playlistId:'RDAMVM'+id}));
+        if (cookie !== session) throw Error('ACCOUNT_CHANGED');
+        return {...response,tracks:response.tracks.slice(0,Math.max(1,Math.min(Number(request.limit) || 100,100)))};
+      }
+    });
     host.metadataSource('youtube-music.metadata',async request => {
       const id = videoId(request.identity);
       if (!id) return null;

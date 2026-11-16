@@ -1,0 +1,93 @@
+{
+  "continuationContents": {
+    "musicShelfContinuation": {
+      "contents": [
+        {
+          "musicResponsiveListItemRenderer": {
+            "playlistItemData": {
+              "videoId": "lmnopqrstuv"
+            },
+            "flexColumns": [
+              {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                  "text": {
+                    "runs": [
+                      {
+                        "text": "Another saved song",
+                        "navigationEndpoint": {
+                          "watchEndpoint": {
+                            "videoId": "lmnopqrstuv"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "musicResponsiveListItemFlexColumnRenderer": {
+                  "text": {
+                    "runs": [
+                      {
+                        "text": "Fixture artist",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UCfixture",
+                            "browseEndpointContextSupportedConfigs": {
+                              "browseEndpointContextMusicConfig": {
+                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "text": " \u00e2\u20ac\u00a2 "
+                      },
+                      {
+                        "text": "Fixture album",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "MPREfixture",
+                            "browseEndpointContextSupportedConfigs": {
+                              "browseEndpointContextMusicConfig": {
+                                "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "fixedColumns": [
+              {
+                "musicResponsiveListItemFixedColumnRenderer": {
+                  "text": {
+                    "simpleText": "4:01"
+                  }
+                }
+              }
+            ],
+            "thumbnail": {
+              "musicThumbnailRenderer": {
+                "thumbnail": {
+                  "thumbnails": [
+                    {
+                      "url": "https://example.org/small.jpg"
+                    },
+                    {
+                      "url": "https://example.org/large.jpg"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

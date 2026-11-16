@@ -19,8 +19,9 @@ import dev.metrofuse.api.AudioQuery
 import dev.metrofuse.api.AudioResult
 import dev.metrofuse.api.AudioSource
 import dev.metrofuse.api.CatalogProvider
-import dev.metrofuse.api.HomePlugin
 import dev.metrofuse.api.HomeRequest
+import dev.metrofuse.api.LibraryProvider
+import dev.metrofuse.api.LibraryRequest
 import dev.metrofuse.api.LoginCredentials
 import dev.metrofuse.api.LoginField
 import dev.metrofuse.api.LoginPlugin
@@ -31,16 +32,22 @@ import dev.metrofuse.api.MetadataRequest
 import dev.metrofuse.api.MetadataSource
 import dev.metrofuse.api.NativeLoginUi
 import dev.metrofuse.api.NativePlugin
+import dev.metrofuse.api.PagedHomePlugin
 import dev.metrofuse.api.PluginContext
 import dev.metrofuse.api.PluginLoginState
 import dev.metrofuse.api.PluginSettings
 import dev.metrofuse.api.ProviderError
+import dev.metrofuse.api.RecommendationProvider
+import dev.metrofuse.api.RecommendationRequest
+import dev.metrofuse.api.RecommendationResult
 import dev.metrofuse.api.SearchProvider
 import dev.metrofuse.api.SearchRequest
 import dev.metrofuse.api.SearchResult
+import dev.metrofuse.api.SongVoteRequest
 import dev.metrofuse.api.StreamDescriptor
 import dev.metrofuse.api.StreamTransport
 import dev.metrofuse.api.TrackIdentity
+import dev.metrofuse.api.TrackVote
 import dev.metrofuse.api.WebLoginRequest
 import dev.metrofuse.sdk.WebViewLabels
 import dev.metrofuse.sdk.WebViewLoginScreen
@@ -50,6 +57,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
@@ -67,7 +75,7 @@ class YouTubeMusicPlugin :
     NativePlugin,
     LoginPlugin,
     NativeLoginUi,
-    HomePlugin {
+    PagedHomePlugin {
     private var client: HttpClient? = null
     private var innerTube: InnerTube? = null
     private var cipherService: YouTubeCipherService? = null
@@ -79,12 +87,17 @@ class YouTubeMusicPlugin :
 
     override suspend fun loginRequest() = request
 
+    override suspend fun getHomePage(
+        request: HomeRequest,
+        continuation: String?,
+    ) = checkNotNull(session).homePage(request, continuation)
+
     @Composable
     override fun Content(context: LoginUiContext) {
         accountScreen?.Content(context)
     }
 
-    private fun browserRequest() =
+    internal fun browserRequest() =
         WebLoginRequest(
             url = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com",
             cookieUrl = "https://music.youtube.com",
@@ -93,8 +106,12 @@ class YouTubeMusicPlugin :
             allowedHosts =
                 listOf(
                     "music.youtube.com",
+                    "youtube.com",
                     "www.youtube.com",
+                    "accounts.youtube.com",
+                    "consent.youtube.com",
                     "accounts.google.com",
+                    "accounts.google.co.uk",
                     "consent.google.com",
                     "myaccount.google.com",
                     "www.google.com",
@@ -193,13 +210,35 @@ class YouTubeMusicPlugin :
     }
 }
 
-private class GuestCatalog(
+internal class GuestCatalog(
     private val tube: InnerTube,
     private val guestClient: YouTubeGuestClient,
 ) : SearchProvider,
     CatalogProvider,
+    LibraryProvider,
+    RecommendationProvider,
     MetadataSource {
     override val id = "youtube-music.catalog"
+    private val accountLibrary = YouTubeLibrary(tube, guestClient)
+
+    override suspend fun library(request: LibraryRequest) = accountLibrary.page(request)
+
+    override val supportsLikedSongs = true
+    override val supportsSongVotes = true
+
+    override suspend fun setSongVote(request: SongVoteRequest): Boolean {
+        if (!tube.hasSapCookieAuth() || !VIDEO_ID.matches(request.trackId)) return false
+        val snapshot = tube.sessionSnapshot()
+        val profile = guestClient.get()
+        val response =
+            when (request.vote) {
+                TrackVote.LIKE -> tube.likeVideo(profile, request.trackId, snapshot)
+                TrackVote.DISLIKE -> tube.dislikeVideo(profile, request.trackId, snapshot)
+                TrackVote.INDIFFERENT -> tube.unlikeVideo(profile, request.trackId, snapshot)
+            }
+        if (snapshot != tube.sessionSnapshot()) throw CancellationException("YouTube Music account changed")
+        return response.status.isSuccess()
+    }
 
     override suspend fun search(request: SearchRequest): SearchResult {
         val query = request.query.trim()
@@ -214,6 +253,23 @@ private class GuestCatalog(
     override suspend fun artist(id: String) = browse(id)?.let { YouTubeCatalog.artist(it, id) }
 
     override suspend fun playlist(id: String) = browse(if (id.startsWith("VL")) id else "VL$id")?.let { YouTubeCatalog.playlist(it, id) }
+
+    override suspend fun recommendations(request: RecommendationRequest): RecommendationResult {
+        val id = videoId(request.identity) ?: return RecommendationResult(emptyList())
+        require((request.continuation?.length ?: 0) <= 16_384)
+        val snapshot = tube.sessionSnapshot()
+        val response =
+            tube.next(
+                guestClient.get(),
+                videoId = if (request.continuation == null) id else null,
+                playlistId = if (request.continuation == null) "RDAMVM$id" else null,
+                continuation = request.continuation,
+            )
+        check(response.status.isSuccess()) { "YouTube Music recommendations failed with HTTP ${response.status.value}" }
+        val result = YouTubeCatalog.radio(response.bodyAsJsonObjectLimited(MAX_RESPONSE_BYTES))
+        check(snapshot == tube.sessionSnapshot()) { "YouTube Music session changed" }
+        return result.copy(tracks = result.tracks.take(request.limit.coerceIn(1, 100)))
+    }
 
     private suspend fun browse(id: String): JsonObject? {
         if (!BROWSE_ID.matches(id)) return null

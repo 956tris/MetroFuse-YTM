@@ -3,6 +3,7 @@ package dev.metrofuse.youtube
 import com.metrolist.innertubex.InnerTube
 import com.metrolist.innertubex.bodyAsJsonObjectLimited
 import com.metrolist.innertubex.models.YouTubeLocale
+import dev.metrofuse.api.HomePage
 import dev.metrofuse.api.HomeRequest
 import dev.metrofuse.api.HomeShelf
 import dev.metrofuse.api.LoginCredentials
@@ -58,12 +59,27 @@ internal class YouTubeSession(
             state.value = PluginLoginState()
         }
 
-    suspend fun home(request: HomeRequest): List<HomeShelf> {
+    suspend fun home(request: HomeRequest): List<HomeShelf> = homePage(request).shelves
+
+    suspend fun homePage(
+        request: HomeRequest,
+        continuation: String? = null,
+    ): HomePage {
+        require((continuation?.length ?: 0) <= 16_384)
         val profile = client.get()
         tube.locale = YouTubeLocale(gl = request.country, hl = request.language)
-        val response = tube.browse(profile, browseId = "FEmusic_home", setLogin = loginState.value.loggedIn)
+        val snapshot = tube.sessionSnapshot()
+        val response =
+            tube.browse(
+                profile,
+                browseId = if (continuation == null) "FEmusic_home" else null,
+                continuation = continuation,
+                setLogin = loginState.value.loggedIn,
+            )
         check(response.status.isSuccess()) { "YouTube Music Home failed with HTTP ${response.status.value}" }
-        return YouTubeCatalog.home(response.bodyAsJsonObjectLimited(MAX_RESPONSE_BYTES))
+        val root = response.bodyAsJsonObjectLimited(MAX_RESPONSE_BYTES)
+        check(snapshot == tube.sessionSnapshot()) { "YouTube Music session changed" }
+        return HomePage(YouTubeCatalog.home(root), YouTubeCatalog.homeContinuation(root))
     }
 
     private fun accountName(root: JsonObject): String? =

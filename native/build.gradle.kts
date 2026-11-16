@@ -209,8 +209,6 @@ val linkPluginResources =
                 androidManifestFile.asFile,
                 "-I",
                 sdk.resolve("platforms/android-37.0/android.jar"),
-                "-A",
-                preparedAndroid.get().dir("assets").asFile,
                 "--min-sdk-version",
                 "24",
                 "--target-sdk-version",
@@ -229,5 +227,7 @@ tasks.register<Zip>("packagePluginApk") {
     isReproducibleFileOrder = true
     from(dexOutput)
     from(preparedAndroid.map { it.dir("lib") }) { into("lib") }
+    // aapt2 -A writes backslash entry names on Windows (assets/metrofuse\manifest.json); Zip writes proper separators.
+    from(preparedAndroid.map { it.dir("assets") }) { into("assets") }
     from({ zipTree(resourcesApk.get().asFile) })
 }

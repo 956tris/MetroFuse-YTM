@@ -6,6 +6,8 @@ import dev.metrofuse.api.CatalogPlaylist
 import dev.metrofuse.api.HomeItem
 import dev.metrofuse.api.HomeLayout
 import dev.metrofuse.api.HomeShelf
+import dev.metrofuse.api.LibraryPage
+import dev.metrofuse.api.RecommendationResult
 import dev.metrofuse.api.SearchResult
 import dev.metrofuse.api.Track
 import kotlinx.serialization.json.JsonArray
@@ -25,10 +27,29 @@ internal object YouTubeCatalog {
         )
     private val headerRenderers =
         setOf("musicDetailHeaderRenderer", "musicResponsiveHeaderRenderer", "musicImmersiveHeaderRenderer", "musicVisualHeaderRenderer")
+    private val shelfNames =
+        setOf(
+            "musicCarouselShelfRenderer",
+            "musicShelfRenderer",
+            "musicImmersiveCarouselShelfRenderer",
+            "gridRenderer",
+            "musicGridShelfRenderer",
+            "musicCardShelfRenderer",
+        )
+    private val shelfHeaderNames =
+        setOf(
+            "musicCarouselShelfBasicHeaderRenderer",
+            "musicCarouselShelfHeaderRenderer",
+            "musicImmersiveCarouselShelfBasicHeaderRenderer",
+            "musicImmersiveCarouselShelfHeaderRenderer",
+            "gridHeaderRenderer",
+            "musicGridShelfBasicHeaderRenderer",
+        )
 
     fun home(root: JsonObject): List<HomeShelf> {
         var remaining = 1000
-        return renderers(root["contents"], setOf("musicCarouselShelfRenderer", "musicShelfRenderer", "musicImmersiveCarouselShelfRenderer"))
+        return homeRoots(root)
+            .flatMap(::shelves)
             .mapNotNull { shelf ->
                 if (remaining == 0) return@mapNotNull null
                 val header = shelf["header"] ?: shelf
@@ -36,19 +57,12 @@ internal object YouTubeCatalog {
                     return@mapNotNull null
                 }
                 val title =
-                    text(shelf["title"]) ?: renderers(header, setOf("musicCarouselShelfBasicHeaderRenderer"))
+                    text(shelf["title"]) ?: renderers(header, shelfHeaderNames)
                         .firstNotNullOfOrNull { text(it["title"]) } ?: return@mapNotNull null
                 val items =
-                    renderers(shelf["contents"], itemRenderers)
-                        .mapNotNull { row ->
-                            track(row)?.let { HomeItem(track = it) } ?: collection(row)?.let {
-                                when (it.kind) {
-                                    Kind.ALBUM -> HomeItem(album = it.album())
-                                    Kind.ARTIST -> HomeItem(artist = it.artist())
-                                    Kind.PLAYLIST -> HomeItem(playlist = it.playlist())
-                                }
-                            }
-                        }.distinct()
+                    (sequenceOf(shelf) + renderers(shelf["contents"] ?: shelf["items"], itemRenderers))
+                        .mapNotNull(::homeItem)
+                        .distinctBy { it.track?.id ?: it.album?.id ?: it.artist?.id ?: it.playlist?.id }
                         .take(minOf(100, remaining))
                         .toList()
                 items.takeIf { it.isNotEmpty() }?.let {
@@ -68,6 +82,141 @@ internal object YouTubeCatalog {
             }.take(50)
             .toList()
     }
+
+    private fun homeItem(row: JsonObject): HomeItem? =
+        collection(row)?.let {
+            when (it.kind) {
+                Kind.ALBUM -> HomeItem(album = it.album())
+                Kind.ARTIST -> HomeItem(artist = it.artist())
+                Kind.PLAYLIST -> HomeItem(playlist = it.playlist())
+            }
+        } ?: track(row)?.let { HomeItem(track = it) }
+
+    fun library(root: JsonObject): LibraryPage {
+        check(root["contents"] != null || root["continuationContents"] != null || responseActions(root).any()) {
+            "Missing library contents"
+        }
+        check(root.obj("responseContext").obj("mainAppWebResponseContext").string("loggedOut") != "true") {
+            "YouTube Music library session expired"
+        }
+        val items =
+            homeRoots(root)
+                .flatMap { renderers(it, itemRenderers) }
+                .mapNotNull(::homeItem)
+                .distinctBy {
+                    it.track?.let { "track:${it.id}" } ?: it.album?.let { "album:${it.id}" } ?: it.artist?.let { "artist:${it.id}" }
+                        ?: "playlist:${it.playlist?.id}"
+                }.toList()
+        require(items.size <= 1000)
+        val tokens =
+            homeRoots(root)
+                .flatMap { renderers(it, libraryContainers) }
+                .mapNotNull(::continuation)
+                .toList() +
+                responseActions(root).mapNotNull { inlineContinuation(it["continuationItems"]) }.toList()
+        val distinct = tokens.distinct()
+        return LibraryPage(items, distinct.singleOrNull(), complete = distinct.size <= 1)
+    }
+
+    private val libraryContainers =
+        setOf(
+            "musicShelfRenderer",
+            "musicShelfContinuation",
+            "musicPlaylistShelfRenderer",
+            "musicPlaylistShelfContinuation",
+            "gridRenderer",
+            "gridContinuation",
+            "sectionListRenderer",
+            "sectionListContinuation",
+        )
+
+    fun homeContinuation(root: JsonObject): String? {
+        homeRoots(root).flatMap { renderers(it, setOf("sectionListRenderer", "sectionListContinuation")) }.forEach { section ->
+            continuation(section)?.let { return it }
+        }
+        return responseActions(root).firstNotNullOfOrNull { inlineContinuation(it["continuationItems"]) }
+    }
+
+    private fun homeRoots(root: JsonObject): Sequence<JsonElement> =
+        sequenceOf(root["contents"], root["continuationContents"]).filterNotNull() +
+            responseActions(root).mapNotNull { it["continuationItems"] }
+
+    private fun responseActions(root: JsonObject): Sequence<JsonObject> =
+        sequenceOf(root["onResponseReceivedActions"], root["onResponseReceivedEndpoints"], root["actions"])
+            .flatMap { renderers(it, setOf("appendContinuationItemsAction", "reloadContinuationItemsCommand")) }
+
+    private fun shelves(root: JsonElement): Sequence<JsonObject> =
+        sequence {
+            val pending = ArrayDeque<JsonElement>()
+            pending.add(root)
+            while (pending.isNotEmpty()) {
+                when (val current = pending.removeLast()) {
+                    is JsonObject -> {
+                        current.entries.toList().asReversed().forEach { (name, value) ->
+                            if (name in shelfNames && value is JsonObject) yield(value) else pending.add(value)
+                        }
+                    }
+
+                    is JsonArray -> {
+                        current.asReversed().forEach(pending::addLast)
+                    }
+
+                    else -> {
+                        Unit
+                    }
+                }
+            }
+        }
+
+    fun radio(root: JsonObject): RecommendationResult {
+        val panel =
+            root.obj("continuationContents").obj("playlistPanelContinuation")
+                ?: renderers(root["contents"], setOf("musicQueueRenderer")).firstOrNull().obj("content").obj("playlistPanelRenderer")
+                ?: return RecommendationResult(emptyList())
+        val tracks =
+            (panel["contents"] as? JsonArray)
+                .orEmpty()
+                .mapNotNull { item ->
+                    val row = item as? JsonObject ?: return@mapNotNull null
+                    val renderer =
+                        row.obj("playlistPanelVideoRenderer")
+                            ?: row.obj("playlistPanelVideoWrapperRenderer").obj("primaryRenderer").obj("playlistPanelVideoRenderer")
+                            ?: return@mapNotNull null
+                    val id = renderer.string("videoId")?.takeIf(VIDEO_ID::matches) ?: return@mapNotNull null
+                    val name = text(renderer["title"]) ?: return@mapNotNull null
+                    val metadata = runs(renderer["longBylineText"]).ifEmpty { runs(renderer["shortBylineText"]) }
+                    val album = metadata.firstOrNull { kind(endpoint(it).obj("browseEndpoint")) == Kind.ALBUM }
+                    Track(
+                        id,
+                        name,
+                        credit(metadata).ifBlank { text(renderer["shortBylineText"]).orEmpty() },
+                        album.string("text").orEmpty(),
+                        durationMillis(text(renderer["lengthText"])) ?: 0,
+                        artwork(renderer),
+                        trackExtras(id, album, renderer),
+                    )
+                }.distinctBy(Track::id)
+                .take(100)
+        return RecommendationResult(tracks, continuation(panel))
+    }
+
+    private fun continuation(container: JsonObject): String? =
+        (container["continuations"] as? JsonArray).orEmpty().firstNotNullOfOrNull { entry ->
+            val row = entry as? JsonObject
+            (row.obj("nextRadioContinuationData") ?: row.obj("nextContinuationData"))
+                .string("continuation")
+                ?.takeIf { it.isNotBlank() && it.length <= 16_384 }
+        } ?: inlineContinuation(container["contents"])
+
+    private fun inlineContinuation(contents: JsonElement?): String? =
+        (contents as? JsonArray).orEmpty().firstNotNullOfOrNull { entry ->
+            (entry as? JsonObject)
+                .obj("continuationItemRenderer")
+                .obj("continuationEndpoint")
+                .obj("continuationCommand")
+                .string("token")
+                ?.takeIf { it.isNotBlank() && it.length <= 16_384 }
+        }
 
     fun search(
         root: JsonObject,
@@ -138,7 +287,7 @@ internal object YouTubeCatalog {
                 ?: renderers(row["overlay"], setOf("watchEndpoint")).firstOrNull().string("videoId")
                 ?: column(row, "flexColumns", 0)?.let(::runs)?.firstNotNullOfOrNull { endpoint(it).obj("watchEndpoint").string("videoId") }
                 ?: return null
-        if (!VIDEO_ID.matches(videoId) || kind(endpoint(row).obj("browseEndpoint")) == Kind.ALBUM) return null
+        if (!VIDEO_ID.matches(videoId) || collection(row) != null) return null
         val title = title(row) ?: return null
         val metadata = metadata(row)
         val album = metadata.firstOrNull { kind(endpoint(it).obj("browseEndpoint")) == Kind.ALBUM }
@@ -152,18 +301,45 @@ internal object YouTubeCatalog {
                     .mapNotNull(::durationMillis)
                     .firstOrNull() ?: 0,
             artwork = artwork(row),
-            extras =
-                buildMap {
-                    put("youtube", videoId)
-                    album?.let { endpoint(it).obj("browseEndpoint").string("browseId") }?.let { put("albumId", it) }
-                },
+            extras = trackExtras(videoId, album, row),
         )
     }
 
+    private fun trackExtras(
+        id: String,
+        album: JsonObject?,
+        row: JsonObject,
+    ): Map<String, String> =
+        buildMap {
+            put("youtube", id)
+            renderers(row["menu"], setOf("likeButtonRenderer"))
+                .firstOrNull { it.obj("target").string("videoId").let { target -> target == null || target == id } }
+                ?.string("likeStatus")
+                ?.takeIf { it in setOf("LIKE", "DISLIKE", "INDIFFERENT") }
+                ?.let { put("likeStatus", it) }
+            album?.let { endpoint(it).obj("browseEndpoint").string("browseId") }?.let { put("albumId", it) }
+            val type =
+                row.string("musicVideoType") ?: endpoint(row)
+                    .obj("watchEndpoint")
+                    .obj("watchEndpointMusicSupportedConfigs")
+                    .obj("watchEndpointMusicConfig")
+                    .string("musicVideoType")
+            type?.let { put("musicVideoType", it) }
+            if (renderers(row["badges"], setOf("musicInlineBadgeRenderer"))
+                    .any { it.obj("icon").string("iconType") == "MUSIC_EXPLICIT_BADGE" }
+            ) {
+                put("explicit", "true")
+            }
+        }
+
     private fun collection(row: JsonObject): Collection? {
-        val browse = endpoint(row).obj("browseEndpoint") ?: return null
-        val id = browse.string("browseId") ?: return null
-        return Collection(id, title(row) ?: return null, kind(browse) ?: return null, credit(metadata(row)), artwork(row))
+        val navigation = endpoint(row)
+        val browse = navigation.obj("browseEndpoint")
+        val watch = navigation.obj("watchPlaylistEndpoint") ?: navigation.obj("watchEndpoint")?.takeIf { it.string("videoId") == null }
+        val id = browse.string("browseId") ?: watch.string("playlistId") ?: return null
+        if (id.startsWith("FEmusic_library")) return null
+        val kind = kind(browse) ?: watch.string("playlistId")?.let { Kind.PLAYLIST } ?: return null
+        return Collection(id, title(row) ?: return null, kind, credit(metadata(row)), artwork(row))
     }
 
     private fun title(row: JsonObject) = text(row["title"]) ?: text(column(row, "flexColumns", 0)) ?: text(row["secondTitle"])
@@ -182,8 +358,11 @@ internal object YouTubeCatalog {
             .joinToString(", ")
 
     private fun artwork(row: JsonObject): String =
-        sequenceOf(row["thumbnail"], row["thumbnailRenderer"], row["foregroundThumbnail"])
-            .flatMap { renderers(it, setOf("musicThumbnailRenderer", "croppedSquareThumbnailRenderer", "thumbnail")) }
+        (
+            sequenceOf(row.obj("thumbnail")) +
+                sequenceOf(row["thumbnail"], row["thumbnailRenderer"], row["foregroundThumbnail"])
+                    .flatMap { renderers(it, setOf("musicThumbnailRenderer", "croppedSquareThumbnailRenderer", "thumbnail")) }
+        ).filterNotNull()
             .flatMap { ((it["thumbnails"] as? JsonArray).orEmpty()).asSequence() }
             .mapNotNull { (it as? JsonObject).string("url") }
             .lastOrNull { it.startsWith("https://") }

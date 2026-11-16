@@ -1,0 +1,24 @@
+{
+  "contents": {"singleColumnBrowseResultsRenderer": {"tabs": [{"tabRenderer": {"content": {"sectionListRenderer": {
+    "contents": [
+      {"musicCarouselShelfRenderer": {
+        "header": {"musicCarouselShelfBasicHeaderRenderer": {"title": {"runs": [{"text": "Listen again"}]}}},
+        "contents": [{"musicTwoRowItemRenderer": {"title": {"runs": [{"text": "Seed track"}]}, "navigationEndpoint": {"watchEndpoint": {"videoId": "abcdefghijk"}}}}]
+      }},
+      {"musicCarouselShelfRenderer": {
+        "header": {"musicCarouselShelfBasicHeaderRenderer": {"title": {"runs": [{"text": "Quick picks"}]}}},
+        "numItemsPerColumn": "4",
+        "contents": [{"musicResponsiveListItemRenderer": {
+          "flexColumns": [{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Related track"}]}}}],
+          "playlistItemData": {"videoId": "lmnopqrstuv"}
+        }}],
+        "continuations": [{"nextContinuationData": {"continuation": "quick-picks-only"}}]
+      }},
+      {"musicCarouselShelfRenderer": {
+        "header": {"musicCarouselShelfBasicHeaderRenderer": {"title": {"runs": [{"text": "Your library"}]}, "navigationEndpoint": {"browseEndpoint": {"browseId": "FEmusic_library_playlists"}}}},
+        "contents": [{"musicTwoRowItemRenderer": {"title": {"runs": [{"text": "Library playlist"}]}, "navigationEndpoint": {"browseEndpoint": {"browseId": "VLPLlibrary"}}}}]
+      }}
+    ],
+    "continuations": [{"nextContinuationData": {"continuation": "home-next"}}]
+  }}}}]}}
+}

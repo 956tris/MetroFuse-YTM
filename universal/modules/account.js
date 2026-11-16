@@ -7,7 +7,7 @@ export const webLoginRequest = {
   url: 'https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com',
   cookieUrl: 'https://music.youtube.com', cookieField: 'cookie',
   requiredCookies: ['SAPISID','__Secure-3PAPISID','__Secure-1PAPISID'],
-  allowedHosts: ['music.youtube.com','www.youtube.com','accounts.google.com','consent.google.com','myaccount.google.com','www.google.com']
+  allowedHosts: ['music.youtube.com','youtube.com','www.youtube.com','accounts.youtube.com','consent.youtube.com','accounts.google.com','accounts.google.co.uk','consent.google.com','myaccount.google.com','www.google.com']
 };
 
 export const loginUi = {

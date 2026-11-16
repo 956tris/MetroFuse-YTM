@@ -1,0 +1,35 @@
+{
+  "contents": {
+    "singleColumnMusicWatchNextResultsRenderer": {
+      "tabbedRenderer": {"watchNextTabbedResultsRenderer": {"tabs": [
+        {"tabRenderer": {"content": {"musicQueueRenderer": {"content": {"playlistPanelRenderer": {
+          "contents": [
+            {"playlistPanelVideoRenderer": {
+              "videoId": "abcdefghijk", "title": {"runs": [{"text": "Seed track"}]},
+              "shortBylineText": {"runs": [{"text": "Fixture artist"}]},
+              "lengthText": {"runs": [{"text": "3:12"}]},
+              "thumbnail": {"thumbnails": [{"url": "https://example.org/seed.jpg"}]}
+            }},
+            {"playlistPanelVideoWrapperRenderer": {
+              "primaryRenderer": {"playlistPanelVideoRenderer": {
+                "videoId": "lmnopqrstuv", "title": {"runs": [{"text": "Related track"}]},
+                "longBylineText": {"runs": [
+                  {"text": "Fixture artist", "navigationEndpoint": {"browseEndpoint": {"browseId": "UCfixture"}}},
+                  {"text": " • "},
+                  {"text": "Fixture album", "navigationEndpoint": {"browseEndpoint": {"browseId": "MPREfixture"}}}
+                ]},
+                "lengthText": {"runs": [{"text": "4:01"}]},
+                "thumbnail": {"thumbnails": [{"url": "https://example.org/related.jpg"}]},
+                "badges": [{"musicInlineBadgeRenderer": {"icon": {"iconType": "MUSIC_EXPLICIT_BADGE"}}}],
+                "navigationEndpoint": {"watchEndpoint": {"videoId": "lmnopqrstuv", "watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_ATV"}}}}
+              }},
+              "counterpart": {"playlistPanelVideoRenderer": {"videoId": "zzzzzzzzzzz", "title": {"runs": [{"text": "Counterpart video"}]}}}
+            }}
+          ],
+          "continuations": [{"nextRadioContinuationData": {"continuation": "radio-next"}}]
+        }}}}}},
+        {"tabRenderer": {"content": {"playlistPanelRenderer": {"contents": [{"playlistPanelVideoRenderer": {"videoId": "zzzzzzzzzzz", "title": {"runs": [{"text": "Unrelated tab"}]}}}]}}}}
+      ]}}
+    }
+  }
+}

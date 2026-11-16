@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: 956tris/MetroFuse
-          ref: 775b387755449c9e7f74d9c6d9e80b27b2a971bb
+          ref: 8d62892c04be53e84956390f5dee1f90bf082706
           path: .ci/metrofuse
           submodules: recursive
           persist-credentials: false

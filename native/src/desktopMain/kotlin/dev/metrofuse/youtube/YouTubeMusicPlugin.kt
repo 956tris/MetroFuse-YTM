@@ -312,9 +312,20 @@ internal class GuestAudio(
         }
         if (request.quality.lossless) return AudioResult(error = ProviderError("LOSSLESS_UNAVAILABLE"))
         val hints = ContentHints().withStreamCapabilities(allowHls = true, allowSabr = true, allowBoundedRange = true)
+        val quality = AudioQuality.valueOf(request.quality.preset.name)
         val stream =
             try {
-                extractor.extract(id, hints, audioQuality = AudioQuality.valueOf(request.quality.preset.name))
+                val selected = extractor.extract(id, hints, audioQuality = quality)
+                if (selected?.sabrBootstrap?.videoId?.let { it != id } == true) {
+                    val fallbackHints = hints.withStreamCapabilities(allowHls = true, allowSabr = false, allowBoundedRange = true)
+                    val fallback = extractor.extract(id, fallbackHints, audioQuality = quality)
+                    if (fallback == null || fallback.sabrBootstrap != null || fallback.videoId != id) {
+                        return AudioResult(error = ProviderError("SABR_MEDIA_IDENTITY_MISMATCH"))
+                    }
+                    fallback
+                } else {
+                    selected
+                }
             } catch (e: StreamResolveException) {
                 return AudioResult(error = ProviderError("YOUTUBE_${e.reason.name}"))
             } ?: return AudioResult(error = ProviderError("STREAM_UNAVAILABLE"))
@@ -343,7 +354,7 @@ internal class GuestAudio(
                     expiresAtMillis = stream.expiresAt?.toEpochMilliseconds(),
                     headers = stream.headers,
                     sampleRate = stream.sampleRate,
-                    contentLength = stream.contentLengthBytes,
+                    contentLength = stream.contentLengthBytes?.takeIf { it > 0 },
                     durationSeconds = stream.mediaMetadata?.durationSeconds,
                     attributes = stream.sabrBootstrap?.let { mapOf("metrofuse.sabr.v1" to encodeSabrBootstrap(it)) }.orEmpty(),
                 ),

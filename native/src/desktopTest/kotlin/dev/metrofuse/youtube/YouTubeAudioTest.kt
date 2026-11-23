@@ -25,6 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
@@ -97,24 +98,7 @@ class YouTubeAudioTest {
     fun sabrSessionCrossesTheBoundaryAsJsonAndKeepsTheSelectedAudioFormat() =
         runBlocking {
             val extractor = FixtureExtractor()
-            extractor.stream =
-                extractor.stream?.copy(
-                    sabrBootstrap =
-                        SabrBootstrap(
-                            videoId = "abcdefghijk",
-                            serverAbrStreamingUrl = "https://fixture.googlevideo.com/sabr",
-                            videoPlaybackUstreamerConfig = byteArrayOf(1, 2, 3),
-                            clientName = 67,
-                            clientVersion = "fixture",
-                            audioFormat = SabrFormatId(251, 123L),
-                            discardVideoFormat = SabrFormatId(160, 456L),
-                            discardVideoHeight = 144,
-                            durationMs = 180000L,
-                            contentLengthBytes = 123456L,
-                            mimeType = "audio/webm",
-                            poToken = byteArrayOf(4, 5, 6),
-                        ),
-                )
+            extractor.stream = extractor.stream?.copy(sabrBootstrap = bootstrap())
             val stream = assertNotNull(GuestAudio(extractor, Settings()).resolve(query).stream)
             assertEquals(StreamTransport.SABR_UMP, stream.transport)
             assertEquals("https://fixture.googlevideo.com/sabr", stream.locator)
@@ -132,6 +116,52 @@ class YouTubeAudioTest {
             assertEquals("BAUG", payload["poToken"]?.jsonPrimitive?.content)
         }
 
+    @Test
+    fun sabrOmitsNonpositiveContentLengths() =
+        runBlocking {
+            val extractor = FixtureExtractor()
+            for (length in listOf(0L, -1L)) {
+                extractor.stream = extractor.stream?.copy(contentLengthBytes = length, sabrBootstrap = bootstrap().copy(contentLengthBytes = length))
+                val stream = assertNotNull(GuestAudio(extractor, Settings()).resolve(query).stream)
+                assertEquals(StreamTransport.SABR_UMP, stream.transport)
+                assertNull(stream.contentLength)
+                val payload = Json.parseToJsonElement(assertNotNull(stream.attributes["metrofuse.sabr.v1"])).jsonObject
+                assertNull(payload["contentLengthBytes"])
+            }
+        }
+
+    @Test
+    fun mismatchedSabrMediaRetriesWithoutSabrAndRejectsUnusableFallback() =
+        runBlocking {
+            val extractor = FixtureExtractor()
+            val direct = assertNotNull(extractor.stream)
+            extractor.stream = direct.copy(sabrBootstrap = bootstrap().copy(videoId = "otherVideo1"))
+            extractor.fallbackStream = direct
+            val source = GuestAudio(extractor, Settings())
+            assertEquals(StreamTransport.RANGE_HTTP, source.resolve(query).stream?.transport)
+            assertEquals(2, extractor.calls)
+            assertFalse(assertNotNull(extractor.hints).allowSabr)
+
+            extractor.fallbackStream = null
+            assertEquals("SABR_MEDIA_IDENTITY_MISMATCH", source.resolve(query).error?.code)
+        }
+
+    private fun bootstrap() =
+        SabrBootstrap(
+            videoId = "abcdefghijk",
+            serverAbrStreamingUrl = "https://fixture.googlevideo.com/sabr",
+            videoPlaybackUstreamerConfig = byteArrayOf(1, 2, 3),
+            clientName = 67,
+            clientVersion = "fixture",
+            audioFormat = SabrFormatId(251, 123L),
+            discardVideoFormat = SabrFormatId(160, 456L),
+            discardVideoHeight = 144,
+            durationMs = 180000L,
+            contentLengthBytes = 123456L,
+            mimeType = "audio/webm",
+            poToken = byteArrayOf(4, 5, 6),
+        )
+
     private class Settings : PluginSettings {
         override val values = MutableStateFlow<Map<String, JsonElement>>(mapOf("audioEnabled" to JsonPrimitive(true)))
 
@@ -148,6 +178,7 @@ class YouTubeAudioTest {
         var cancel = false
         var quality: AudioQuality? = null
         var hints: ContentHints? = null
+        var fallbackStream: ExtractedStream? = null
         var stream: ExtractedStream? =
             ExtractedStream(
                 videoId = "abcdefghijk",
@@ -180,7 +211,7 @@ class YouTubeAudioTest {
             this.hints = hints
             quality = audioQuality
             if (cancel) throw CancellationException("Fixture cancellation")
-            return stream
+            return if (hints.allowSabr) stream else fallbackStream
         }
     }
 }

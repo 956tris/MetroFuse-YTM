@@ -18,7 +18,7 @@ internal fun encodeSabrBootstrap(value: SabrBootstrap): String =
         put("discardVideoFormat", sabrFormat(value.discardVideoFormat))
         put("discardVideoHeight", value.discardVideoHeight)
         put("durationMs", value.durationMs)
-        value.contentLengthBytes?.let { put("contentLengthBytes", it) }
+        value.contentLengthBytes?.takeIf { it > 0 }?.let { put("contentLengthBytes", it) }
         put("mimeType", value.mimeType)
         value.audioTrackId?.let { put("audioTrackId", it) }
         put("isDrc", value.isDrc)

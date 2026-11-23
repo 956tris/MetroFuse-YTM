@@ -1,7 +1,7 @@
 {
   "id": "metrofuse.youtube-music",
   "name": "YouTube Music (JavaScript)",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "author": "MetroFuse and MetroList contributors",
   "api": "1.1.0",
   "runtime": "javascript",

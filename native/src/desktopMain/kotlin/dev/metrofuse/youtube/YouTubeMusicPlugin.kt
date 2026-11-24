@@ -69,6 +69,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.util.Locale
@@ -192,7 +193,7 @@ class YouTubeMusicPlugin :
         context.registerCatalogProvider(catalog)
         context.registerMetadataSource(catalog)
         context.registerAudioSource(GuestAudio(extractor, context.settings))
-        val canvas = YouTubeCanvas(http)
+        val canvas = YouTubeCanvas(tube, musicClient, extractor)
         canvasResolver = canvas
         val canvasService =
             object : JsonService {
@@ -201,14 +202,41 @@ class YouTubeMusicPlugin :
                     val track =
                         request["track"]?.let { runCatching { Json { ignoreUnknownKeys = true }.decodeFromJsonElement<Track>(it) }.getOrNull() }
                             ?: context.player.state.value.track
-                    val url = canvas.resolve(track)
-                    return buildJsonObject { url?.let { put("url", it) } }
+                    val maxHeight = (request["maxHeight"] as? JsonPrimitive)?.intOrNull ?: 720
+                    val resolved = canvas.resolve(track, maxHeight = maxHeight)
+                    return buildJsonObject {
+                        resolved?.let {
+                            put("url", it.url)
+                            put("videoId", it.videoId)
+                            put("source", "youtube_music_video")
+                            it.mimeType?.let { mime -> put("mimeType", mime) }
+                            it.width?.let { w -> put("width", w) }
+                            it.height?.let { h -> put("height", h) }
+                            it.durationSeconds?.let { d -> put("durationSeconds", d) }
+                            if (it.headers.isNotEmpty()) {
+                                put("headers", JsonObject(it.headers.mapValues { (_, v) -> JsonPrimitive(v) }))
+                            }
+                        }
+                    }
                 }
             }
         context.registerService("youtube-music.canvas/v1", canvasService)
         context.registerService("artwork.canvas/v1", canvasService)
         // Video button hook: the host plays the video returned here next to the audio from GuestAudio.
-        context.registerService("playback.video/v1", GuestVideo(extractor, context.settings))
+        context.registerService(
+            "playback.video/v1",
+            GuestVideo(
+                extractor = extractor,
+                settings = context.settings,
+                resolveVideoId = { track ->
+                    if ((context.settings.values.value["canvasEnabled"] as? JsonPrimitive)?.booleanOrNull != false) {
+                        canvas.resolveMusicVideoId(track)
+                    } else {
+                        trackVideoId(track)
+                    }
+                },
+            ),
+        )
     }
 
     override suspend fun stop() {

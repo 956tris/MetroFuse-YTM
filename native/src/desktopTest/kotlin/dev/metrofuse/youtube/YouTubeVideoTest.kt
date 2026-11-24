@@ -97,6 +97,18 @@ class YouTubeVideoTest {
             assertEquals(0, service.call(buildJsonObject { put("track", Json.encodeToJsonElement(track)) }).size)
         }
 
+    @Test
+    fun resolvesCounterpartVideoIdForAudioTracksWhenCustomResolverProvided() =
+        runBlocking {
+            val extractor = VideoFixtureExtractor()
+            extractor.stream = extractor.stream?.copy(videoId = "omvTarget01")
+            val service = GuestVideo(extractor, VideoSettings(), resolveVideoId = { "omvTarget01" })
+            val response = service.call(buildJsonObject { put("track", Json.encodeToJsonElement(track)) })
+
+            assertEquals("omvTarget01", extractor.lastVideoId)
+            assertEquals("https://fixture.googlevideo.com/video.webm", response["url"]?.jsonPrimitive?.content)
+        }
+
     private fun sabrVideoBootstrap(videoId: String) =
         SabrBootstrap(
             videoId = videoId,
@@ -139,6 +151,7 @@ class YouTubeVideoTest {
 
     private class VideoFixtureExtractor : StreamExtractor {
         var calls = 0
+        var lastVideoId: String? = null
         var hints: ContentHints? = null
         var stream: ExtractedStream? =
             ExtractedStream(
@@ -179,6 +192,7 @@ class YouTubeVideoTest {
             clientPlaybackNonce: String,
         ): ExtractedStream? {
             calls++
+            this.lastVideoId = videoId
             this.hints = hints
             return if (calls > 1 && !hints.allowSabr) fallbackStream else stream
         }

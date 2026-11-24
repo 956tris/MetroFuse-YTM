@@ -67,12 +67,12 @@ Plugin API documentation is in [MetroFuse-Plugin-Docs](https://github.com/956tri
 
 ## Canvas
 
-The native package registers `artwork.canvas/v1` and `youtube-music.canvas/v1`, returning Apple Music motion artwork for the current track when title, artist, album and duration match. Toggle it with the **Canvas** plugin setting (`canvasEnabled`). The lookup is anonymous and never uses your YouTube account.
+The native package registers `artwork.canvas/v1` and `youtube-music.canvas/v1`, resolving the current track's **YouTube Music Video Canvas** (via `/next` official `playlistPanelVideoWrapperRenderer` counterpart lookup with YouTube Music Videos search fallback, returning a direct HTTPS YouTube Music video stream). Toggle it with the **YouTube Music Video Canvas** plugin setting (`canvasEnabled`).
 
 ## Video
 
-The native package registers `playback.video/v1`, which hooks the player's video button (requires a MetroFuse build with the updated video-button hook). Audio still comes from `GuestAudio`; the plugin supplies either a direct HTTPS stream or a validated SABR video session (up to 4K / 2160p with adaptive height variants) for the same video ID. Toggle video with `videoEnabled` and 4K resolution with `video4k`.
+The native package registers `playback.video/v1`, which hooks the player's video button (requires a MetroFuse build with the updated video-button hook). Audio still comes from `GuestAudio`; the plugin resolves the track's music video ID when needed and supplies either a direct HTTPS stream or a validated SABR video session (up to 4K / 2160p with adaptive height variants). Toggle video with `videoEnabled` and 4K resolution with `video4k`.
 
 ## Credits
 
-Canvas lookup and track-matching logic are adapted from [Metrolist](https://github.com/MetrolistGroup/Metrolist) (GPL-3.0) by the Metrolist contributors, as are the [InnerTubeX](https://github.com/MetrolistGroup/innertubex) and [QuackJS](https://github.com/MetrolistGroup/quackjs) libraries and the original catalog parsing. Thank you to the Metrolist team. This plugin remains GPL-3.0.
+YouTube Music Video counterpart matching and Canvas logic are adapted from [Metrolist](https://github.com/MetrolistGroup/Metrolist) (`MusicVideoCounterpart.kt`, `MusicVideoMatcher.kt`, `AnimatedCoverSelection.kt`, GPL-3.0) by the Metrolist contributors, as are the [InnerTubeX](https://github.com/MetrolistGroup/innertubex) and [QuackJS](https://github.com/MetrolistGroup/quackjs) libraries and the original catalog parsing. Thank you to the Metrolist team. This plugin remains GPL-3.0.

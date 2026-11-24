@@ -1,7 +1,7 @@
 {
   "id": "metrofuse.youtube-music",
   "name": "YouTube Music",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "author": "MetroFuse and MetroList contributors",
   "runtime": "kotlin",
   "api": "1.1.0",
@@ -12,7 +12,7 @@
   "description": "YouTube Music catalog, recommendations, account sign-in, paginated Home and Library, Canvas, and 4K/SABR audio & video through InnerTubeX.",
   "settings": [
     {"key": "audioEnabled", "title": "Resolve YouTube Music audio", "type": "BOOLEAN", "default": true},
-    {"key": "canvasEnabled", "title": "Show Canvas motion artwork (adapted from Metrolist)", "type": "BOOLEAN", "default": true},
+    {"key": "canvasEnabled", "title": "YouTube Music Video Canvas (adapted from Metrolist)", "type": "BOOLEAN", "default": true},
     {"key": "videoEnabled", "title": "Play YouTube video from the player's video button", "type": "BOOLEAN", "default": true},
     {"key": "video4k", "title": "Allow up to 4K (2160p) video playback", "type": "BOOLEAN", "default": true}
   ]

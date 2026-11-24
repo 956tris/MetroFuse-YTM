@@ -1,235 +1,288 @@
 package dev.metrofuse.youtube
 
-// Canvas lookup adapted from Metrolist (https://github.com/MetrolistGroup/Metrolist), GPL-3.0:
-//   shared/src/jvmSharedMain/kotlin/com/metrolist/shared/api/artwork/DirectCanvasProvider.kt
-// Copyright (C) Metrolist contributors. Modified for the MetroFuse plugin API: the Apple Music
-// motion-artwork lookup and the track matching rules are ported; Metrolist's host-specific
-// logging, settings and HTTP wrappers were replaced with plain Ktor calls.
+// YouTube Music Video Canvas counterpart and matching logic adapted from Metrolist
+// (https://github.com/MetrolistGroup/Metrolist), GPL-3.0:
+//   shared/src/commonMain/kotlin/com/metrolist/shared/api/musicvideo/MusicVideoCounterpart.kt
+//   shared/src/commonMain/kotlin/com/metrolist/shared/api/musicvideo/MusicVideoMatcher.kt
+//   shared/src/commonMain/kotlin/com/metrolist/shared/api/artwork/AnimatedCoverSelection.kt
+// Copyright (C) Metrolist contributors. Modified for the MetroFuse plugin API.
 
+import com.metrolist.innertubex.InnerTube
+import com.metrolist.innertubex.bodyAsJsonObjectLimited
+import com.metrolist.innertubex.extraction.ContentHints
+import com.metrolist.innertubex.extraction.StreamExtractor
+import com.metrolist.innertubex.extraction.StreamResolveException
 import dev.metrofuse.api.Track
-import io.ktor.client.HttpClient
-import io.ktor.client.request.get
-import io.ktor.client.request.header
-import io.ktor.client.request.parameter
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.URLProtocol
-import io.ktor.http.Url
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.contentOrNull
 import java.text.Normalizer
-import java.util.Base64
 import java.util.Locale
+import kotlin.math.abs
+
+internal data class YouTubeCanvasVideo(
+    val url: String,
+    val videoId: String,
+    val mimeType: String?,
+    val width: Int?,
+    val height: Int?,
+    val durationSeconds: Long?,
+    val headers: Map<String, String>,
+)
 
 internal class YouTubeCanvas(
-    private val http: HttpClient,
-    private val country: () -> String = { Locale.getDefault().country.ifBlank { "US" } },
-    private val language: () -> String = { Locale.getDefault().toLanguageTag() },
+    private val tube: InnerTube,
+    private val client: YouTubeGuestClient,
+    private val extractor: StreamExtractor,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
-    private val json = Json { ignoreUnknownKeys = true }
     private val mutex = Mutex()
-    private var token: Pair<String, Long>? = null
     private val cache = LinkedHashMap<List<Any?>, Pair<String?, Long>>(32, 0.75f, true)
 
-    /** Returns a trusted HTTPS motion-artwork URL for [track], or null when none matches. */
-    suspend fun resolve(track: Track): String? {
-        if (track.title.isBlank() || track.artist.isBlank()) return null
-        val storefront = country().lowercase(Locale.ROOT)
-        val lang = language()
-        val key = listOf(track.title, track.artist, track.album, track.duration, storefront, lang)
+    /** Resolves a YouTube Music Video counterpart ID for [track], or returns [track]'s ID if already a music video. */
+    suspend fun resolveMusicVideoId(track: Track): String? {
+        val sourceId = trackVideoId(track)
+        if (sourceId != null && isVideoMusicType(track.extras["musicVideoType"])) {
+            return sourceId
+        }
+        val key = listOf(sourceId, track.title, track.artist, track.duration)
         return mutex.withLock {
             cache[key]?.takeIf { it.second > now() }?.let { return@withLock it.first }
             val result =
                 try {
-                    withTimeoutOrNull(8_000) { apple(track, storefront, lang) }
+                    withTimeoutOrNull(10_000) {
+                        lookupCounterpart(sourceId) ?: searchMusicVideo(track, excludeId = sourceId)
+                    }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
                     null
                 }
-            cache[key] = result to (now() + if (result == null) 60_000 else 300_000)
+            cache[key] = result to (now() + if (result == null) 60_000L else 300_000L)
             while (cache.size > 32) cache.remove(cache.keys.first())
             result
         }
     }
 
+    /** Returns a direct HTTPS YouTube Music video stream suitable for looping Canvas clips. */
+    suspend fun resolve(
+        track: Track,
+        maxHeight: Int = 720,
+    ): YouTubeCanvasVideo? {
+        val videoId = resolveMusicVideoId(track) ?: return null
+        val hints =
+            ContentHints()
+                .copy(wantVideo = true, maxVideoHeight = maxHeight.coerceIn(144, 1080))
+                .withStreamCapabilities(allowHls = false, allowSabr = false, allowBoundedRange = true)
+        val stream =
+            try {
+                extractor.extract(videoId, hints)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: StreamResolveException) {
+                null
+            } ?: return null
+        if (stream.videoId != videoId) return null
+        val url = stream.videoUrl?.takeIf { it.startsWith("https://", ignoreCase = true) } ?: return null
+        return YouTubeCanvasVideo(
+            url = url,
+            videoId = videoId,
+            mimeType = stream.videoMimeType,
+            width = stream.videoWidth,
+            height = stream.videoHeight,
+            durationSeconds = stream.mediaMetadata?.durationSeconds ?: track.duration.takeIf { it > 0 }?.div(1000L),
+            headers = stream.headers,
+        )
+    }
+
     fun clear() {
-        token = null
         cache.clear()
     }
 
-    private suspend fun apple(
+    private suspend fun lookupCounterpart(sourceId: String?): String? {
+        sourceId ?: return null
+        val response = tube.next(client.get(), videoId = sourceId)
+        if (!response.status.isSuccess()) return null
+        val root = response.bodyAsJsonObjectLimited(MAX_RESPONSE_BYTES)
+        return parseCounterpartVideoId(root, sourceId)
+    }
+
+    private suspend fun searchMusicVideo(
         track: Track,
-        storefront: String,
-        lang: String,
+        excludeId: String?,
     ): String? {
-        if (!storefront.matches(Regex("[a-z]{2}")) || lang.isBlank()) return null
-        val auth = developerToken(storefront) ?: return null
-        val search =
-            appleJson("https://amp-api.music.apple.com/v1/catalog/$storefront/search", auth, storefront) {
-                parameter("types", "songs")
-                parameter("term", "${track.title} ${track.artist}")
-                parameter("limit", 10)
-                parameter("l", lang)
-            } ?: return null
-        val songs = search.obj("results")?.obj("songs")?.array("data").orEmpty()
-        val duration = track.duration.takeIf { it > 0 }
-        for (song in songs.take(10)) {
-            val item = song as? JsonObject ?: continue
-            val id = item.text("id")?.takeIf { it.matches(Regex("[0-9]+")) } ?: continue
-            val attrs = item.obj("attributes") ?: continue
-            if (!matches(
-                    track.title,
-                    track.artist,
-                    track.album,
-                    duration,
-                    attrs.text("name"),
-                    attrs.text("artistName"),
-                    attrs.text("albumName"),
-                    attrs.text("durationInMillis")?.toLongOrNull(),
-                )
-            ) {
-                continue
-            }
-            val detail =
-                appleJson("https://amp-api.music.apple.com/v1/catalog/$storefront/songs/$id", token?.first ?: auth, storefront) {
-                    parameter("include", "albums")
-                    parameter("extend", "editorialVideo")
-                    parameter("l", lang)
-                } ?: continue
-            for (record in detail.array("data").orEmpty()) {
-                val albums = (record as? JsonObject)?.obj("relationships")?.obj("albums")?.array("data").orEmpty()
-                for (entry in albums) {
-                    val videos = (entry as? JsonObject)?.obj("attributes")?.obj("editorialVideo") ?: continue
-                    for (kind in listOf("motionSquareVideo1x1", "motionDetailSquare", "motionTallVideo3x4", "motionDetailTall")) {
-                        val url = videos.obj(kind)?.text("video")
-                        if (trustedMedia(url)) return url
-                    }
-                }
-            }
-        }
-        return null
-    }
-
-    private suspend fun appleJson(
-        url: String,
-        auth: String,
-        storefront: String,
-        params: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
-    ): JsonObject? {
-        var authorization = auth
-        repeat(2) { attempt ->
-            val response =
-                http.get(url) {
-                    header("Authorization", "Bearer $authorization")
-                    header("Origin", "https://music.apple.com")
-                    header("User-Agent", USER_AGENT)
-                    params()
-                }
-            if (response.status.value == 401 && attempt == 0) {
-                token = null
-                authorization = developerToken(storefront) ?: return null
-            } else {
-                if (!response.status.isSuccess()) return null
-                val body = response.bodyAsText().takeIf { it.length <= 256 * 1024 } ?: return null
-                return json.parseToJsonElement(body) as? JsonObject
-            }
-        }
-        return null
-    }
-
-    // Reads the public web-player developer token, as Metrolist does; no account credentials are used.
-    private suspend fun developerToken(storefront: String): String? {
-        token?.takeIf { it.second > now() + 300_000 }?.let { return it.first }
-        val home = http.get("https://music.apple.com/$storefront/browse") { header("User-Agent", USER_AGENT) }
-        if (!home.status.isSuccess()) return null
-        val html = home.bodyAsText().takeIf { it.length <= 4 * 1024 * 1024 } ?: return null
-        val script =
-            Regex("""<script type="module" crossorigin src="([^"]+\.js)"""").find(html)?.groupValues?.get(1)
-                ?: Regex("""/assets/index[^"'\s]*\.js""").find(html)?.value ?: return null
-        val scriptUrl = if (script.startsWith('/')) "https://music.apple.com$script" else script
-        if (!trustedHost(scriptUrl, setOf("music.apple.com"))) return null
-        val bundle = http.get(scriptUrl) { header("User-Agent", USER_AGENT) }
-        if (!bundle.status.isSuccess()) return null
-        val js = bundle.bodyAsText().takeIf { it.length <= 16 * 1024 * 1024 } ?: return null
-        val candidate =
-            Regex("""eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}""")
-                .findAll(js)
-                .mapNotNull { match ->
-                    val payload =
-                        runCatching {
-                            val part = match.value.split('.')[1]
-                            json.parseToJsonElement(String(Base64.getUrlDecoder().decode(part))).jsonObject
-                        }.getOrNull() ?: return@mapNotNull null
-                    val expiry = payload.text("exp")?.toLongOrNull()?.times(1_000) ?: return@mapNotNull null
-                    match.value.takeIf { payload.text("iss") == "AMPWebPlay" && expiry > now() + 300_000 }?.let { it to expiry }
-                }.maxByOrNull { it.second }
-        token = candidate
-        return candidate?.first
+        if (track.title.isBlank()) return null
+        val query = listOf(track.title, track.artist).filter(String::isNotBlank).joinToString(" ")
+        val response =
+            tube.search(
+                client = client.get(),
+                query = query,
+                params = YTM_VIDEOS_SEARCH_PARAMS,
+                setLogin = tube.hasSapCookieAuth(),
+            )
+        if (!response.status.isSuccess()) return null
+        val root = response.bodyAsJsonObjectLimited(MAX_RESPONSE_BYTES)
+        val candidates = YouTubeCatalog.search(root, limit = 15).tracks
+        return selectBestCandidate(track, candidates, excludeId)
     }
 
     companion object {
-        private const val USER_AGENT =
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        internal const val YTM_VIDEOS_SEARCH_PARAMS = "EgWKAQIQAWoKEAMQBBAJEAoQBQ%3D%3D"
 
-        internal fun trustedMedia(url: String?): Boolean =
-            url != null && trustedHost(url, setOf("itunes.apple.com", "apple.com", "mzstatic.com", "akamaized.net"))
-
-        private fun trustedHost(
-            url: String,
-            domains: Set<String>,
-        ): Boolean {
-            val parsed = runCatching { Url(url) }.getOrNull() ?: return false
-            return parsed.protocol == URLProtocol.HTTPS && parsed.user == null && parsed.password == null && parsed.port == 443 &&
-                domains.any { parsed.host == it || parsed.host.endsWith(".$it") }
-        }
-
-        internal fun matches(
-            title: String,
-            artist: String,
-            album: String?,
-            duration: Long?,
-            foundTitle: String?,
-            foundArtist: String?,
-            foundAlbum: String?,
-            foundDuration: Long?,
-        ): Boolean {
-            fun words(value: String?): Set<String> =
-                Normalizer
-                    .normalize(value.orEmpty(), Normalizer.Form.NFKD)
-                    .replace(Regex("\\p{M}+"), "")
-                    .lowercase(Locale.ROOT)
-                    .split(Regex("[^\\p{L}\\p{N}]+"))
-                    .filter { it.isNotBlank() && it !in setOf("feat", "ft", "featuring", "official", "video", "audio") }
-                    .toSet()
-
-            fun similarity(
-                left: String?,
-                right: String?,
-            ): Double {
-                val a = words(left)
-                val b = words(right)
-                return if (a.isEmpty() || b.isEmpty()) 0.0 else a.intersect(b).size.toDouble() / maxOf(a.size, b.size)
+        internal fun parseCounterpartVideoId(
+            response: JsonObject,
+            sourceVideoId: String,
+        ): String? {
+            for (wrapper in findObjects(response, "playlistPanelVideoWrapperRenderer")) {
+                val primaryId = rendererVideoId(wrapper, "primaryRenderer") ?: continue
+                val counterparts = wrapper["counterpart"] as? JsonArray ?: continue
+                for (entry in counterparts) {
+                    val counterpart = entry as? JsonObject ?: continue
+                    val counterpartId = rendererVideoId(counterpart, "counterpartRenderer") ?: continue
+                    val forward = sourceVideoId == primaryId
+                    if (!forward && sourceVideoId != counterpartId) continue
+                    val targetId = if (forward) counterpartId else primaryId
+                    if (targetId == sourceVideoId || !VIDEO_ID.matches(targetId)) continue
+                    val targetType = if (forward) findStringValue(counterpart, "musicVideoType") else null
+                    if (targetType == null || isVideoMusicType(targetType)) {
+                        return targetId
+                    }
+                }
             }
-            val requestedArtist = words(artist)
-            if (requestedArtist.isEmpty() || requestedArtist != words(foundArtist)) return false
-            return similarity(title, foundTitle) >= 0.75 &&
-                (duration == null || duration <= 0 || foundDuration == null || kotlin.math.abs(duration - foundDuration) <= 10_000) &&
-                (album.isNullOrBlank() || foundAlbum.isNullOrBlank() || similarity(album, foundAlbum) >= 0.5)
+            return null
         }
+
+        internal fun isVideoMusicType(raw: String?): Boolean {
+            val upper = raw?.uppercase(Locale.ROOT)?.trim().orEmpty()
+            if (upper.isBlank()) return false
+            val normalized = upper.removePrefix("MUSIC_VIDEO_TYPE_")
+            if ("ATV" in normalized || "PODCAST" in normalized || "PRIVATELY_OWNED" in normalized) return false
+            return "OMV" in normalized ||
+                "OFFICIAL_SOURCE" in normalized ||
+                "UGC" in normalized ||
+                "USER_GENERATED" in normalized ||
+                "LIVE" in normalized ||
+                normalized == "VIDEO" ||
+                "VIDEO" in normalized
+        }
+
+        internal fun selectBestCandidate(
+            track: Track,
+            candidates: List<Track>,
+            excludeId: String? = null,
+        ): String? =
+            candidates
+                .asSequence()
+                .mapNotNull { candidate ->
+                    val id = trackVideoId(candidate) ?: return@mapNotNull null
+                    if (id == excludeId) return@mapNotNull null
+                    val type = candidate.extras["musicVideoType"]
+                    if (type != null && !isVideoMusicType(type)) return@mapNotNull null
+                    val score = scoreCandidate(track, candidate) ?: return@mapNotNull null
+                    id to score
+                }.maxByOrNull { it.second }
+                ?.first
+
+        private fun scoreCandidate(
+            target: Track,
+            candidate: Track,
+        ): Double? {
+            val titleSim = tokenSimilarity(target.title, candidate.title)
+            if (titleSim < 0.6) return null
+            if (target.artist.isNotBlank() && candidate.artist.isNotBlank()) {
+                val targetArtists = tokens(target.artist)
+                val candidateArtists = tokens(candidate.artist)
+                if (targetArtists.isNotEmpty() && candidateArtists.isNotEmpty() && targetArtists.intersect(candidateArtists).isEmpty()) {
+                    return null
+                }
+            }
+            if (target.duration > 0L && candidate.duration > 0L && abs(target.duration - candidate.duration) > 90_000L) {
+                return null
+            }
+            val officialBonus =
+                if (candidate.extras["musicVideoType"]?.uppercase(Locale.ROOT)?.let { "OMV" in it || "OFFICIAL_SOURCE" in it } == true) {
+                    0.5
+                } else {
+                    0.0
+                }
+            return titleSim + officialBonus
+        }
+
+        private fun tokens(value: String?): Set<String> =
+            Normalizer
+                .normalize(value.orEmpty(), Normalizer.Form.NFKD)
+                .replace(Regex("\\p{M}+"), "")
+                .lowercase(Locale.ROOT)
+                .split(Regex("[^\\p{L}\\p{N}]+"))
+                .filter { it.isNotBlank() && it !in NOISE_WORDS }
+                .toSet()
+
+        private fun tokenSimilarity(
+            left: String?,
+            right: String?,
+        ): Double {
+            val a = tokens(left)
+            val b = tokens(right)
+            return if (a.isEmpty() || b.isEmpty()) 0.0 else a.intersect(b).size.toDouble() / maxOf(a.size, b.size)
+        }
+
+        private val NOISE_WORDS =
+            setOf("feat", "ft", "featuring", "official", "video", "music", "audio", "lyric", "lyrics", "hd", "4k")
+
+        private fun rendererVideoId(
+            container: JsonObject,
+            key: String,
+        ): String? =
+            ((container[key] as? JsonObject)?.get("playlistPanelVideoRenderer") as? JsonObject)
+                ?.get("videoId")
+                ?.let { (it as? JsonPrimitive)?.contentOrNull }
+                ?.takeIf(VIDEO_ID::matches)
+
+        private fun findObjects(
+            element: JsonElement,
+            key: String,
+        ): Sequence<JsonObject> =
+            sequence {
+                when (element) {
+                    is JsonObject -> {
+                        (element[key] as? JsonObject)?.let { yield(it) }
+                        element.values.forEach { yieldAll(findObjects(it, key)) }
+                    }
+
+                    is JsonArray -> {
+                        element.forEach { yieldAll(findObjects(it, key)) }
+                    }
+
+                    else -> {
+                        return@sequence
+                    }
+                }
+            }
+
+        private fun findStringValue(
+            element: JsonElement,
+            key: String,
+        ): String? =
+            when (element) {
+                is JsonObject -> {
+                    (element[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                        ?: element.values.firstNotNullOfOrNull { findStringValue(it, key) }
+                }
+
+                is JsonArray -> {
+                    element.firstNotNullOfOrNull { findStringValue(it, key) }
+                }
+
+                else -> {
+                    null
+                }
+            }
     }
 }
-
-private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
-
-private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
-
-private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.content

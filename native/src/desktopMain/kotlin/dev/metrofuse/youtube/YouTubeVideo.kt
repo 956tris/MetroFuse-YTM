@@ -26,11 +26,12 @@ internal class GuestVideo(
     private val settings: PluginSettings,
     private val maxHeight: Int = 1080,
     private val maxHeight4k: Int = 2160,
+    private val resolveVideoId: suspend (Track) -> String? = ::trackVideoId,
 ) : JsonService {
     override suspend fun call(request: JsonObject): JsonObject {
         if ((settings.values.value["videoEnabled"] as? JsonPrimitive)?.booleanOrNull == false) return JsonObject(emptyMap())
         val track = request["track"]?.let { runCatching { Json { ignoreUnknownKeys = true }.decodeFromJsonElement<Track>(it) }.getOrNull() }
-        val id = track?.let { trackVideoId(it) } ?: return JsonObject(emptyMap())
+        val id = track?.let { resolveVideoId(it) ?: trackVideoId(it) } ?: return JsonObject(emptyMap())
         val cap = if ((settings.values.value["video4k"] as? JsonPrimitive)?.booleanOrNull != false) maxHeight4k else maxHeight
         val requestedMaxHeight = (request["maxHeight"] as? JsonPrimitive)?.intOrNull?.coerceIn(144, maxHeight4k)
         val effectiveMaxHeight = minOf(requestedMaxHeight ?: cap, cap)

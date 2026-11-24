@@ -20,6 +20,8 @@ import dev.metrofuse.api.AudioResult
 import dev.metrofuse.api.AudioSource
 import dev.metrofuse.api.CatalogProvider
 import dev.metrofuse.api.HomeRequest
+import dev.metrofuse.api.JsonService
+import dev.metrofuse.api.Track
 import dev.metrofuse.api.LibraryProvider
 import dev.metrofuse.api.LibraryRequest
 import dev.metrofuse.api.LoginCredentials
@@ -66,6 +68,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.util.Locale
@@ -82,6 +85,7 @@ class YouTubeMusicPlugin :
     private var session: YouTubeSession? = null
     private var request: LoginRequest? = null
     private var accountScreen: WebViewLoginScreen? = null
+    private var canvasResolver: YouTubeCanvas? = null
     private val signedOut = MutableStateFlow(PluginLoginState())
     override val loginState: StateFlow<PluginLoginState> get() = session?.loginState ?: signedOut
 
@@ -188,9 +192,28 @@ class YouTubeMusicPlugin :
         context.registerCatalogProvider(catalog)
         context.registerMetadataSource(catalog)
         context.registerAudioSource(GuestAudio(extractor, context.settings))
+        val canvas = YouTubeCanvas(http)
+        canvasResolver = canvas
+        val canvasService =
+            object : JsonService {
+                override suspend fun call(request: JsonObject): JsonObject {
+                    if ((context.settings.values.value["canvasEnabled"] as? JsonPrimitive)?.booleanOrNull == false) return buildJsonObject {}
+                    val track =
+                        request["track"]?.let { runCatching { Json { ignoreUnknownKeys = true }.decodeFromJsonElement<Track>(it) }.getOrNull() }
+                            ?: context.player.state.value.track
+                    val url = canvas.resolve(track)
+                    return buildJsonObject { url?.let { put("url", it) } }
+                }
+            }
+        context.registerService("youtube-music.canvas/v1", canvasService)
+        context.registerService("artwork.canvas/v1", canvasService)
+        // Video button hook: the host plays the video returned here next to the audio from GuestAudio.
+        context.registerService("playback.video/v1", GuestVideo(extractor, context.settings))
     }
 
     override suspend fun stop() {
+        canvasResolver?.clear()
+        canvasResolver = null
         session?.logout()
         session = null
         request = null

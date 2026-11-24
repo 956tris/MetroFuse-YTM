@@ -1,6 +1,6 @@
 # Native YouTube Music provider
 
-GPL-3.0. Catalog parsing and the original guest integration were adapted from MetroList at commit e97197786c2a7ad56279cc9bb4ce3233ef6c99ff. The standalone account, Home, JSON client configuration and plugin transport work are maintained by 956tris.
+GPL-3.0. Catalog parsing and the original guest integration were adapted from MetroList at commit e97197786c2a7ad56279cc9bb4ce3233ef6c99ff. The standalone account, Home, JSON client configuration and plugin transport work are maintained by 956tris. Canvas motion-artwork lookup (YouTubeCanvas.kt, the artwork.canvas/v1 service) is adapted from MetroList's DirectCanvasProvider (https://github.com/MetrolistGroup/Metrolist, GPL-3.0) at the supplied main snapshot; matching rules and Apple Music developer-token handling originate from MetroList, with thanks to its contributors.
 
 The build bundles InnerTubeX v0.11.7 from https://github.com/MetrolistGroup/innertubex/tree/v0.11.7 and QuackJS v0.1.4 from https://github.com/MetrolistGroup/quackjs/tree/v0.1.4. The host supplies Kotlin, coroutines, serialization, Ktor, Compose, MetroFuse API 1.1.0 and the plugin SDK. Production code uses platform HTTP engine discovery, including on Android. The plugin owns its network client and session and does not read the application's old YouTube account.
 

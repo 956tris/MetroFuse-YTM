@@ -1,0 +1,235 @@
+package dev.metrofuse.youtube
+
+// Canvas lookup adapted from Metrolist (https://github.com/MetrolistGroup/Metrolist), GPL-3.0:
+//   shared/src/jvmSharedMain/kotlin/com/metrolist/shared/api/artwork/DirectCanvasProvider.kt
+// Copyright (C) Metrolist contributors. Modified for the MetroFuse plugin API: the Apple Music
+// motion-artwork lookup and the track matching rules are ported; Metrolist's host-specific
+// logging, settings and HTTP wrappers were replaced with plain Ktor calls.
+
+import dev.metrofuse.api.Track
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.URLProtocol
+import io.ktor.http.Url
+import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import java.text.Normalizer
+import java.util.Base64
+import java.util.Locale
+
+internal class YouTubeCanvas(
+    private val http: HttpClient,
+    private val country: () -> String = { Locale.getDefault().country.ifBlank { "US" } },
+    private val language: () -> String = { Locale.getDefault().toLanguageTag() },
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    private val json = Json { ignoreUnknownKeys = true }
+    private val mutex = Mutex()
+    private var token: Pair<String, Long>? = null
+    private val cache = LinkedHashMap<List<Any?>, Pair<String?, Long>>(32, 0.75f, true)
+
+    /** Returns a trusted HTTPS motion-artwork URL for [track], or null when none matches. */
+    suspend fun resolve(track: Track): String? {
+        if (track.title.isBlank() || track.artist.isBlank()) return null
+        val storefront = country().lowercase(Locale.ROOT)
+        val lang = language()
+        val key = listOf(track.title, track.artist, track.album, track.duration, storefront, lang)
+        return mutex.withLock {
+            cache[key]?.takeIf { it.second > now() }?.let { return@withLock it.first }
+            val result =
+                try {
+                    withTimeoutOrNull(8_000) { apple(track, storefront, lang) }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    null
+                }
+            cache[key] = result to (now() + if (result == null) 60_000 else 300_000)
+            while (cache.size > 32) cache.remove(cache.keys.first())
+            result
+        }
+    }
+
+    fun clear() {
+        token = null
+        cache.clear()
+    }
+
+    private suspend fun apple(
+        track: Track,
+        storefront: String,
+        lang: String,
+    ): String? {
+        if (!storefront.matches(Regex("[a-z]{2}")) || lang.isBlank()) return null
+        val auth = developerToken(storefront) ?: return null
+        val search =
+            appleJson("https://amp-api.music.apple.com/v1/catalog/$storefront/search", auth, storefront) {
+                parameter("types", "songs")
+                parameter("term", "${track.title} ${track.artist}")
+                parameter("limit", 10)
+                parameter("l", lang)
+            } ?: return null
+        val songs = search.obj("results")?.obj("songs")?.array("data").orEmpty()
+        val duration = track.duration.takeIf { it > 0 }
+        for (song in songs.take(10)) {
+            val item = song as? JsonObject ?: continue
+            val id = item.text("id")?.takeIf { it.matches(Regex("[0-9]+")) } ?: continue
+            val attrs = item.obj("attributes") ?: continue
+            if (!matches(
+                    track.title,
+                    track.artist,
+                    track.album,
+                    duration,
+                    attrs.text("name"),
+                    attrs.text("artistName"),
+                    attrs.text("albumName"),
+                    attrs.text("durationInMillis")?.toLongOrNull(),
+                )
+            ) {
+                continue
+            }
+            val detail =
+                appleJson("https://amp-api.music.apple.com/v1/catalog/$storefront/songs/$id", token?.first ?: auth, storefront) {
+                    parameter("include", "albums")
+                    parameter("extend", "editorialVideo")
+                    parameter("l", lang)
+                } ?: continue
+            for (record in detail.array("data").orEmpty()) {
+                val albums = (record as? JsonObject)?.obj("relationships")?.obj("albums")?.array("data").orEmpty()
+                for (entry in albums) {
+                    val videos = (entry as? JsonObject)?.obj("attributes")?.obj("editorialVideo") ?: continue
+                    for (kind in listOf("motionSquareVideo1x1", "motionDetailSquare", "motionTallVideo3x4", "motionDetailTall")) {
+                        val url = videos.obj(kind)?.text("video")
+                        if (trustedMedia(url)) return url
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private suspend fun appleJson(
+        url: String,
+        auth: String,
+        storefront: String,
+        params: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
+    ): JsonObject? {
+        var authorization = auth
+        repeat(2) { attempt ->
+            val response =
+                http.get(url) {
+                    header("Authorization", "Bearer $authorization")
+                    header("Origin", "https://music.apple.com")
+                    header("User-Agent", USER_AGENT)
+                    params()
+                }
+            if (response.status.value == 401 && attempt == 0) {
+                token = null
+                authorization = developerToken(storefront) ?: return null
+            } else {
+                if (!response.status.isSuccess()) return null
+                val body = response.bodyAsText().takeIf { it.length <= 256 * 1024 } ?: return null
+                return json.parseToJsonElement(body) as? JsonObject
+            }
+        }
+        return null
+    }
+
+    // Reads the public web-player developer token, as Metrolist does; no account credentials are used.
+    private suspend fun developerToken(storefront: String): String? {
+        token?.takeIf { it.second > now() + 300_000 }?.let { return it.first }
+        val home = http.get("https://music.apple.com/$storefront/browse") { header("User-Agent", USER_AGENT) }
+        if (!home.status.isSuccess()) return null
+        val html = home.bodyAsText().takeIf { it.length <= 4 * 1024 * 1024 } ?: return null
+        val script =
+            Regex("""<script type="module" crossorigin src="([^"]+\.js)"""").find(html)?.groupValues?.get(1)
+                ?: Regex("""/assets/index[^"'\s]*\.js""").find(html)?.value ?: return null
+        val scriptUrl = if (script.startsWith('/')) "https://music.apple.com$script" else script
+        if (!trustedHost(scriptUrl, setOf("music.apple.com"))) return null
+        val bundle = http.get(scriptUrl) { header("User-Agent", USER_AGENT) }
+        if (!bundle.status.isSuccess()) return null
+        val js = bundle.bodyAsText().takeIf { it.length <= 16 * 1024 * 1024 } ?: return null
+        val candidate =
+            Regex("""eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}""")
+                .findAll(js)
+                .mapNotNull { match ->
+                    val payload =
+                        runCatching {
+                            val part = match.value.split('.')[1]
+                            json.parseToJsonElement(String(Base64.getUrlDecoder().decode(part))).jsonObject
+                        }.getOrNull() ?: return@mapNotNull null
+                    val expiry = payload.text("exp")?.toLongOrNull()?.times(1_000) ?: return@mapNotNull null
+                    match.value.takeIf { payload.text("iss") == "AMPWebPlay" && expiry > now() + 300_000 }?.let { it to expiry }
+                }.maxByOrNull { it.second }
+        token = candidate
+        return candidate?.first
+    }
+
+    companion object {
+        private const val USER_AGENT =
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+        internal fun trustedMedia(url: String?): Boolean =
+            url != null && trustedHost(url, setOf("itunes.apple.com", "apple.com", "mzstatic.com", "akamaized.net"))
+
+        private fun trustedHost(
+            url: String,
+            domains: Set<String>,
+        ): Boolean {
+            val parsed = runCatching { Url(url) }.getOrNull() ?: return false
+            return parsed.protocol == URLProtocol.HTTPS && parsed.user == null && parsed.password == null && parsed.port == 443 &&
+                domains.any { parsed.host == it || parsed.host.endsWith(".$it") }
+        }
+
+        internal fun matches(
+            title: String,
+            artist: String,
+            album: String?,
+            duration: Long?,
+            foundTitle: String?,
+            foundArtist: String?,
+            foundAlbum: String?,
+            foundDuration: Long?,
+        ): Boolean {
+            fun words(value: String?): Set<String> =
+                Normalizer
+                    .normalize(value.orEmpty(), Normalizer.Form.NFKD)
+                    .replace(Regex("\\p{M}+"), "")
+                    .lowercase(Locale.ROOT)
+                    .split(Regex("[^\\p{L}\\p{N}]+"))
+                    .filter { it.isNotBlank() && it !in setOf("feat", "ft", "featuring", "official", "video", "audio") }
+                    .toSet()
+
+            fun similarity(
+                left: String?,
+                right: String?,
+            ): Double {
+                val a = words(left)
+                val b = words(right)
+                return if (a.isEmpty() || b.isEmpty()) 0.0 else a.intersect(b).size.toDouble() / maxOf(a.size, b.size)
+            }
+            val requestedArtist = words(artist)
+            if (requestedArtist.isEmpty() || requestedArtist != words(foundArtist)) return false
+            return similarity(title, foundTitle) >= 0.75 &&
+                (duration == null || duration <= 0 || foundDuration == null || kotlin.math.abs(duration - foundDuration) <= 10_000) &&
+                (album.isNullOrBlank() || foundAlbum.isNullOrBlank() || similarity(album, foundAlbum) >= 0.5)
+        }
+    }
+}
+
+private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
+
+private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
+
+private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.content

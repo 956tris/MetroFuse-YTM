@@ -64,3 +64,15 @@ Use a host containing `plugin-sdk` and the SABR transport adapter. The SABR adap
 Catalog parsing and initial provider integration were adapted from MetroList at commit `e97197786c2a7ad56279cc9bb4ce3233ef6c99ff`. This standalone implementation and its account, Home and transport work are maintained by 956tris. See [LICENSE](LICENSE), [native provenance](native/SOURCE) and [JavaScript provenance](universal/SOURCE).
 
 Plugin API documentation is in [MetroFuse-Plugin-Docs](https://github.com/956tris/MetroFuse-Plugin-Docs).
+
+## Canvas
+
+The native package registers `artwork.canvas/v1` and `youtube-music.canvas/v1`, returning Apple Music motion artwork for the current track when title, artist, album and duration match. Toggle it with the **Canvas** plugin setting (`canvasEnabled`). The lookup is anonymous and never uses your YouTube account.
+
+## Video
+
+The native package registers `playback.video/v1`, which hooks the player's video button (requires a MetroFuse build with the updated video-button hook). Audio still comes from `GuestAudio`; the plugin supplies either a direct HTTPS stream or a validated SABR video session (up to 4K / 2160p with adaptive height variants) for the same video ID. Toggle video with `videoEnabled` and 4K resolution with `video4k`.
+
+## Credits
+
+Canvas lookup and track-matching logic are adapted from [Metrolist](https://github.com/MetrolistGroup/Metrolist) (GPL-3.0) by the Metrolist contributors, as are the [InnerTubeX](https://github.com/MetrolistGroup/innertubex) and [QuackJS](https://github.com/MetrolistGroup/quackjs) libraries and the original catalog parsing. Thank you to the Metrolist team. This plugin remains GPL-3.0.

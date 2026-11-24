@@ -47,4 +47,50 @@ class YouTubeCatalogTest {
         assertEquals("abcdefghijk", videoId(TrackIdentity("other-id", mapOf("youtube" to "abcdefghijk"))))
         assertNull(videoId(TrackIdentity("../../other")))
     }
+
+    @Test
+    fun searchExtractsMusicVideoTypeFromFlexColumnAndOverlay() {
+        val payload =
+            Json
+                .parseToJsonElement(
+                    """
+                    {
+                      "contents": {
+                        "sectionListRenderer": {
+                          "contents": [{
+                            "musicShelfRenderer": {
+                              "contents": [{
+                                "musicResponsiveListItemRenderer": {
+                                  "playlistItemData": {"videoId": "4NRXx6U8ABQ"},
+                                  "flexColumns": [{
+                                    "musicResponsiveListItemFlexColumnRenderer": {
+                                      "text": {
+                                        "runs": [{
+                                          "text": "Blinding Lights",
+                                          "navigationEndpoint": {
+                                            "watchEndpoint": {
+                                              "videoId": "4NRXx6U8ABQ",
+                                              "watchEndpointMusicSupportedConfigs": {
+                                                "watchEndpointMusicConfig": {
+                                                  "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }]
+                                      }
+                                    }
+                                  }]
+                                }
+                              }]
+                            }
+                          }]
+                        }
+                      }
+                    }
+                    """.trimIndent(),
+                ).jsonObject
+        val track = YouTubeCatalog.search(payload, 5).tracks.single()
+        assertEquals("MUSIC_VIDEO_TYPE_OMV", track.extras["musicVideoType"])
+    }
 }

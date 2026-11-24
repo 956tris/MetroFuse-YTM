@@ -93,5 +93,17 @@ internal class GuestVideo(
     }
 }
 
-internal fun trackVideoId(track: Track): String? =
-    (track.extras["youtube"] ?: track.id).takeIf(VIDEO_ID::matches)
+internal fun trackVideoId(track: Track): String? {
+    val owner = track.extras["pluginOwner"] ?: track.extras["plugin"]
+    val rawProviderId =
+        track.extras["providerTrackId"]?.takeIf {
+            owner == null || owner == "metrofuse.youtube-music"
+        }
+    val rawTrackId =
+        if (track.id.startsWith("metrofuse:metrofuse.youtube-music:")) {
+            track.id.removePrefix("metrofuse:metrofuse.youtube-music:")
+        } else {
+            track.id
+        }
+    return listOfNotNull(track.extras["youtube"], rawProviderId, rawTrackId).firstOrNull(VIDEO_ID::matches)
+}

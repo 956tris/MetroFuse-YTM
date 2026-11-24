@@ -13,6 +13,7 @@ import com.metrolist.innertubex.models.YouTubeLocale
 import com.metrolist.innertubex.sabr.ExperimentalSabrApi
 import com.metrolist.innertubex.sabr.SabrAudioStream
 import dev.metrofuse.api.HomeRequest
+import dev.metrofuse.api.Track
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -101,6 +102,27 @@ class YouTubeLiveTest {
                             channel.cancel(null)
                         }
                     }
+
+                    val canvas = YouTubeCanvas(tube, profile, extractor)
+                    val resolvedCanvas =
+                        assertNotNull(
+                            canvas.resolve(
+                                Track(
+                                    id = "metrofuse:metrofuse.youtube-music:fHI8X4OXluQ",
+                                    title = "Blinding Lights",
+                                    artist = "The Weeknd",
+                                    album = "After Hours",
+                                    duration = 200_000L,
+                                ),
+                                maxHeight = 480,
+                            ),
+                        )
+                    println(
+                        "Live YTM canvas resolved videoId=${resolvedCanvas.videoId}, " +
+                            "hasUrl=${resolvedCanvas.url != null}, hasSabr=${resolvedCanvas.sabr != null}, " +
+                            "height=${resolvedCanvas.height}, durationSeconds=${resolvedCanvas.durationSeconds}",
+                    )
+                    assertTrue(resolvedCanvas.url != null || resolvedCanvas.sabr != null)
                 }
             } finally {
                 cipher.dispose()

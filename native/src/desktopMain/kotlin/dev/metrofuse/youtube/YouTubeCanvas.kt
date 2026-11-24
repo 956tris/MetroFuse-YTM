@@ -28,13 +28,19 @@ import java.util.Locale
 import kotlin.math.abs
 
 internal data class YouTubeCanvasVideo(
-    val url: String,
+    val url: String? = null,
+    val sabr: String? = null,
     val videoId: String,
-    val mimeType: String?,
-    val width: Int?,
-    val height: Int?,
-    val durationSeconds: Long?,
-    val headers: Map<String, String>,
+    val mimeType: String? = null,
+    val codecs: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val bitrate: Int? = null,
+    val itag: Int? = null,
+    val contentLengthBytes: Long? = null,
+    val durationSeconds: Long? = null,
+    val expiresAtMillis: Long? = null,
+    val headers: Map<String, String> = emptyMap(),
 )
 
 internal class YouTubeCanvas(
@@ -57,7 +63,7 @@ internal class YouTubeCanvas(
             cache[key]?.takeIf { it.second > now() }?.let { return@withLock it.first }
             val result =
                 try {
-                    withTimeoutOrNull(10_000) {
+                    withTimeoutOrNull(15_000) {
                         lookupCounterpart(sourceId) ?: searchMusicVideo(track, excludeId = sourceId)
                     }
                 } catch (error: CancellationException) {
@@ -71,33 +77,53 @@ internal class YouTubeCanvas(
         }
     }
 
-    /** Returns a direct HTTPS YouTube Music video stream suitable for looping Canvas clips. */
+    /** Returns a direct HTTPS or SABR YouTube Music video stream suitable for looping Canvas clips. */
     suspend fun resolve(
         track: Track,
         maxHeight: Int = 720,
+        allowSabr: Boolean = true,
     ): YouTubeCanvasVideo? {
         val videoId = resolveMusicVideoId(track) ?: return null
         val hints =
             ContentHints()
                 .copy(wantVideo = true, maxVideoHeight = maxHeight.coerceIn(144, 1080))
-                .withStreamCapabilities(allowHls = false, allowSabr = false, allowBoundedRange = true)
+                .withStreamCapabilities(allowHls = false, allowSabr = allowSabr, allowBoundedRange = true)
         val stream =
             try {
-                extractor.extract(videoId, hints)
+                val selected = extractor.extract(videoId, hints)
+                if (selected?.sabrVideoBootstrap?.videoId?.let { it != videoId } == true) {
+                    val fallbackHints = hints.withStreamCapabilities(allowHls = false, allowSabr = false, allowBoundedRange = true)
+                    val fallback = extractor.extract(videoId, fallbackHints)
+                    if (fallback == null || fallback.sabrVideoBootstrap != null || fallback.videoId != videoId) null else fallback
+                } else {
+                    selected
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: StreamResolveException) {
                 null
             } ?: return null
         if (stream.videoId != videoId) return null
-        val url = stream.videoUrl?.takeIf { it.startsWith("https://", ignoreCase = true) } ?: return null
+        val sabrVideo = stream.sabrVideoBootstrap?.takeIf { allowSabr && it.selectedVideoFormat != null && it.videoId == videoId }
+        val url = stream.videoUrl?.takeIf { it.startsWith("https://", ignoreCase = true) }
+        if (sabrVideo == null && url == null) return null
         return YouTubeCanvasVideo(
             url = url,
+            sabr = sabrVideo?.let(::encodeSabrBootstrap),
             videoId = videoId,
-            mimeType = stream.videoMimeType,
-            width = stream.videoWidth,
-            height = stream.videoHeight,
-            durationSeconds = stream.mediaMetadata?.durationSeconds ?: track.duration.takeIf { it > 0 }?.div(1000L),
+            mimeType = stream.videoMimeType ?: sabrVideo?.selectedVideoMimeType,
+            codecs = stream.videoCodecs,
+            width = stream.videoWidth ?: sabrVideo?.selectedVideoWidth,
+            height = stream.videoHeight ?: sabrVideo?.selectedVideoHeight,
+            bitrate = stream.videoBitrate ?: sabrVideo?.selectedVideoBitrate,
+            itag = stream.videoItag ?: sabrVideo?.selectedVideoFormat?.itag,
+            contentLengthBytes =
+                (stream.videoContentLengthBytes ?: sabrVideo?.selectedVideoContentLengthBytes)?.takeIf { it > 0 },
+            durationSeconds =
+                stream.mediaMetadata?.durationSeconds
+                    ?: sabrVideo?.durationMs?.takeIf { it > 0L }?.div(1000L)
+                    ?: track.duration.takeIf { it > 0 }?.div(1000L),
+            expiresAtMillis = stream.expiresAt?.toEpochMilliseconds(),
             headers = stream.headers,
         )
     }
@@ -108,10 +134,13 @@ internal class YouTubeCanvas(
 
     private suspend fun lookupCounterpart(sourceId: String?): String? {
         sourceId ?: return null
-        val response = tube.next(client.get(), videoId = sourceId)
-        if (!response.status.isSuccess()) return null
-        val root = response.bodyAsJsonObjectLimited(MAX_RESPONSE_BYTES)
-        return parseCounterpartVideoId(root, sourceId)
+        suspend fun fetchCounterpart(playlistId: String?): String? {
+            val response = tube.next(client.get(), videoId = sourceId, playlistId = playlistId)
+            if (!response.status.isSuccess()) return null
+            val root = response.bodyAsJsonObjectLimited(MAX_RESPONSE_BYTES)
+            return parseCounterpartVideoId(root, sourceId)
+        }
+        return fetchCounterpart("RDAMVM$sourceId") ?: fetchCounterpart(null)
     }
 
     private suspend fun searchMusicVideo(

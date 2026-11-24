@@ -109,6 +109,37 @@ class YouTubeVideoTest {
             assertEquals("https://fixture.googlevideo.com/video.webm", response["url"]?.jsonPrimitive?.content)
         }
 
+    @Test
+    fun extractsVideoIdFromPrefixedAndProviderTrackIds() {
+        assertEquals(
+            "abcdefghijk",
+            trackVideoId(Track("metrofuse:metrofuse.youtube-music:abcdefghijk", "Title", "Artist", "Album")),
+        )
+        assertEquals(
+            "abcdefghijk",
+            trackVideoId(
+                Track(
+                    "other",
+                    "Title",
+                    "Artist",
+                    "Album",
+                    extras = mapOf("providerTrackId" to "abcdefghijk", "pluginOwner" to "metrofuse.youtube-music"),
+                ),
+            ),
+        )
+        assertNull(
+            trackVideoId(
+                Track(
+                    "other",
+                    "Title",
+                    "Artist",
+                    "Album",
+                    extras = mapOf("providerTrackId" to "abcdefghijk", "pluginOwner" to "metrofuse.jiosaavn"),
+                ),
+            ),
+        )
+    }
+
     private fun sabrVideoBootstrap(videoId: String) =
         SabrBootstrap(
             videoId = videoId,

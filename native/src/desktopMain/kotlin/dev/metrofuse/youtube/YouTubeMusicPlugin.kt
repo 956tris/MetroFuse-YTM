@@ -203,16 +203,23 @@ class YouTubeMusicPlugin :
                         request["track"]?.let { runCatching { Json { ignoreUnknownKeys = true }.decodeFromJsonElement<Track>(it) }.getOrNull() }
                             ?: context.player.state.value.track
                     val maxHeight = (request["maxHeight"] as? JsonPrimitive)?.intOrNull ?: 720
-                    val resolved = canvas.resolve(track, maxHeight = maxHeight)
+                    val allowSabr = (request["allowSabr"] as? JsonPrimitive)?.booleanOrNull ?: true
+                    val resolved = canvas.resolve(track, maxHeight = maxHeight, allowSabr = allowSabr)
                     return buildJsonObject {
                         resolved?.let {
-                            put("url", it.url)
+                            it.url?.let { url -> put("url", url) }
+                            it.sabr?.let { sabr -> put("sabr", sabr) }
                             put("videoId", it.videoId)
                             put("source", "youtube_music_video")
                             it.mimeType?.let { mime -> put("mimeType", mime) }
+                            it.codecs?.let { codecs -> put("codecs", codecs) }
                             it.width?.let { w -> put("width", w) }
                             it.height?.let { h -> put("height", h) }
+                            it.bitrate?.let { bitrate -> put("bitrate", bitrate) }
+                            it.itag?.let { itag -> put("itag", itag) }
+                            it.contentLengthBytes?.let { length -> put("contentLengthBytes", length) }
                             it.durationSeconds?.let { d -> put("durationSeconds", d) }
+                            it.expiresAtMillis?.let { expires -> put("expiresAtMillis", expires) }
                             if (it.headers.isNotEmpty()) {
                                 put("headers", JsonObject(it.headers.mapValues { (_, v) -> JsonPrimitive(v) }))
                             }
@@ -220,8 +227,8 @@ class YouTubeMusicPlugin :
                     }
                 }
             }
+        context.registerService("artwork.video-canvas/v1", canvasService)
         context.registerService("youtube-music.canvas/v1", canvasService)
-        context.registerService("artwork.canvas/v1", canvasService)
         // Video button hook: the host plays the video returned here next to the audio from GuestAudio.
         context.registerService(
             "playback.video/v1",

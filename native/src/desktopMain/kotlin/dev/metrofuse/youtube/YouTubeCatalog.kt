@@ -324,6 +324,22 @@ internal object YouTubeCatalog {
                     .obj("watchEndpointMusicSupportedConfigs")
                     .obj("watchEndpointMusicConfig")
                     .string("musicVideoType")
+                    ?: column(row, "flexColumns", 0)
+                        ?.let(::runs)
+                        ?.firstNotNullOfOrNull { run ->
+                            endpoint(run)
+                                .obj("watchEndpoint")
+                                .obj("watchEndpointMusicSupportedConfigs")
+                                .obj("watchEndpointMusicConfig")
+                                .string("musicVideoType")
+                        }
+                    ?: renderers(row["overlay"], setOf("watchEndpoint"))
+                        .firstNotNullOfOrNull { watch ->
+                            watch
+                                .obj("watchEndpointMusicSupportedConfigs")
+                                .obj("watchEndpointMusicConfig")
+                                .string("musicVideoType")
+                        }
             type?.let { put("musicVideoType", it) }
             if (renderers(row["badges"], setOf("musicInlineBadgeRenderer"))
                     .any { it.obj("icon").string("iconType") == "MUSIC_EXPLICIT_BADGE" }
